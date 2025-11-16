@@ -7,6 +7,14 @@ import {
   signOut,
 } from "firebase/auth";
 import { auth } from "./firebase";
+import AppLogo from "./assets/app_logo.png";
+import FourPsShield from "./assets/four_ps.png";
+import IdentityInCrisis from "./assets/identityncrisis.png";
+import AdvisorToMen from "./assets/ic_advisortomen.png";
+// For later use:
+// import PowerNLove from "./assets/powernlove.png";
+// import TenRLogo from "./assets/tenr_logo.png";
+
 
 function App() {
   const [user, setUser] = useState<any>(null);
@@ -20,6 +28,10 @@ function App() {
   const [activeSection, setActiveSection] = useState<
     "daily" | "weekly" | "goals" | "journal" | "more" | "admin"
   >("daily");
+
+  const [shieldPreview, setShieldPreview] = useState<
+    { src: string; alt: string } | null
+  >(null);
 
     // 🔥 Weekly reset token – bump this to clear Weekly screen
   const [weeklyResetToken, setWeeklyResetToken] = useState(0);
@@ -125,9 +137,7 @@ function App() {
       mainContent = <GoalsScreen />;
       break;
     case "journal":
-      mainContent = (
-        <PlaceholderFull label="Journal (web console coming soon)" />
-      );
+      mainContent = <JournalScreen />;
       break;
     case "more":
       mainContent = (
@@ -189,6 +199,39 @@ function App() {
       headerIcon = "✅";
   }
 
+  // --- Shield image / alt by section ---
+let shieldImage: string = AppLogo;
+let shieldAlt = "ATM 10MM Shield";
+
+switch (activeSection) {
+  case "daily":
+  case "weekly":
+    shieldImage = FourPsShield;
+    shieldAlt = "Four Quadrant 4Ps shield";
+    break;
+
+  case "goals":
+    shieldImage = IdentityInCrisis;
+    shieldAlt = "Identity In Crisis shield";
+    break;
+
+  case "journal":
+  case "more":
+    shieldImage = AppLogo;
+    shieldAlt = "ATM 10MM Logo";
+    break;
+
+  case "admin":
+    // Temporarily use the app logo for Admin too
+    shieldImage = AppLogo;
+    shieldAlt = "ATM 10MM Logo";
+    break;
+
+  default:
+    shieldImage = AppLogo;
+    shieldAlt = "ATM 10MM Shield";
+}
+
   // Simple stub for now – later we’ll wire this to Firestore roles / claims
   const isAdmin = true;
 
@@ -198,8 +241,16 @@ function App() {
       {/* Top bar */}
       <header style={styles.header}>
         {/* Left: shield */}
-        <button style={styles.shieldButton}>
-          <div style={styles.shieldIcon}>🛡️</div>
+        <button
+          style={styles.shieldButton}
+          type="button"
+          onClick={() => setShieldPreview({ src: shieldImage, alt: shieldAlt })}
+        >
+          <img
+            src={shieldImage}
+            alt={shieldAlt}
+            style={styles.shieldImageSmall}
+          />
           <span style={styles.shieldLabel}>Shield</span>
         </button>
 
@@ -260,6 +311,31 @@ function App() {
           </div>
         )}
       </nav>
+      {/* Shield preview modal */}
+      {shieldPreview && (
+        <div
+          style={styles.shieldModalOverlay}
+          onClick={() => setShieldPreview(null)}
+        >
+          <div
+            style={styles.shieldModalInner}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={shieldPreview.src}
+              alt={shieldPreview.alt}
+              style={styles.shieldModalImage}
+            />
+            <button
+              type="button"
+              style={styles.shieldModalCloseButton}
+              onClick={() => setShieldPreview(null)}
+            >
+              ✕ Close
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main content – this is our ONLY scroll area */}
       <main style={styles.main}>
@@ -613,6 +689,581 @@ function WeeklyScreen({ resetToken }: { resetToken: number }) {
   );
 }
 
+function JournalScreen() {
+  type JournalKey =
+    | "freeFlow"
+    | "gratitude"
+    | "blessings"
+    | "cageWolf"
+    | "tenR"
+    | "selfCare"
+    | "library";
+
+  const items: {
+    key: JournalKey;
+    title: string;
+    subtitle: string;
+    emoji: string;
+  }[] = [
+    {
+      key: "freeFlow",
+      title: "Free Flow",
+      subtitle: "– Talk! Let it rip with unfiltered writing.",
+      emoji: "📓",
+    },
+    {
+      key: "gratitude",
+      title: "Gratitude",
+      subtitle: "– Thanks! Capture today’s gifts and graces.",
+      emoji: "🙏",
+    },
+    {
+      key: "blessings",
+      title: "3 Blessings",
+      subtitle: "– Tally! Three concrete blessings from today.",
+      emoji: "✨",
+    },
+    {
+      key: "cageWolf",
+      title: "Cage The Wolf",
+      subtitle: "– Tempted? De-fang the urge on paper.",
+      emoji: "🐺",
+    },
+    {
+      key: "tenR",
+      title: "10R Process",
+      subtitle: "– Triggered? Walk the full 10R outline.",
+      emoji: "📝",
+    },
+    {
+      key: "selfCare",
+      title: "Self Care Writing",
+      subtitle: "– Traumatized? Structured care for your nervous system.",
+      emoji: "🪞",
+    },
+    {
+      key: "library",
+      title: "Journal Library Search",
+      subtitle: "Find past entries by title, date, or keywords.",
+      emoji: "🔍",
+    },
+  ];
+
+  const [selectedKey, setSelectedKey] = useState<JournalKey>("freeFlow");
+  const selected = items.find((i) => i.key === selectedKey)!;
+
+  return (
+    <div style={styles.actionsLayout}>
+      {/* LEFT: list of outlines + library */}
+      <section style={styles.panel}>
+        <div style={styles.panelHeader}>
+          <h2 style={styles.panelTitle}>Journal</h2>
+          <div style={styles.panelSubTitle}>
+            Start a new outline, or open the library to search past entries.
+          </div>
+        </div>
+
+        <div style={styles.goalsList}>
+          {/* “New Journal” block label */}
+          <div style={styles.goalsSectionLabel}>New Journal</div>
+
+          {items
+            .filter((i) => i.key !== "library")
+            .map((item) => {
+              const isActive = item.key === selectedKey;
+              const cardStyle = isActive
+                ? {
+                    ...styles.goalsCard,
+                    borderColor: "#22c55e",
+                    boxShadow:
+                      "0 0 0 1px rgba(34,197,94,0.5), 0 18px 40px rgba(0,0,0,0.55)",
+                  }
+                : styles.goalsCard;
+
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => setSelectedKey(item.key)}
+                  style={cardStyle}
+                >
+                  <div style={styles.goalsEmojiCircle}>{item.emoji}</div>
+                  <div style={styles.goalsCardTextBlock}>
+                    <div style={styles.goalsCardTitle}>{item.title}</div>
+                    <div style={styles.goalsCardSubtitle}>
+                      {item.subtitle}
+                    </div>
+                  </div>
+                  <div style={styles.goalsChevron}>›</div>
+                </button>
+              );
+            })}
+
+          <div style={{ height: 18 }} />
+
+          {/* Library section */}
+          <div style={styles.goalsSectionLabel}>Journal Library</div>
+
+          {items
+            .filter((i) => i.key === "library")
+            .map((item) => {
+              const isActive = item.key === selectedKey;
+              const cardStyle = isActive
+                ? {
+                    ...styles.goalsCard,
+                    borderColor: "#22c55e",
+                    boxShadow:
+                      "0 0 0 1px rgba(34,197,94,0.5), 0 18px 40px rgba(0,0,0,0.55)",
+                  }
+                : styles.goalsCard;
+
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => setSelectedKey(item.key)}
+                  style={cardStyle}
+                >
+                  <div style={styles.goalsEmojiCircle}>{item.emoji}</div>
+                  <div style={styles.goalsCardTextBlock}>
+                    <div style={styles.goalsCardTitle}>{item.title}</div>
+                    <div style={styles.goalsCardSubtitle}>
+                      {item.subtitle}
+                    </div>
+                  </div>
+                  <div style={styles.goalsChevron}>›</div>
+                </button>
+              );
+            })}
+        </div>
+      </section>
+
+            {/* RIGHT: detail pane */}
+            <section style={styles.panel}>
+              <div style={styles.panelHeader}>
+                <h2 style={styles.panelTitle}>{selected.title}</h2>
+                <div style={styles.panelSubTitle}>{selected.subtitle}</div>
+              </div>
+
+              {selectedKey === "freeFlow" ? (
+                <FreeFlowDetail />
+              ) : selectedKey === "gratitude" ? (
+                <GratitudeDetail />
+              ) : selectedKey === "library" ? (
+                <div style={styles.goalsDetailBody}>
+                  <p style={styles.goalsDetailText}>
+                    This will become your full <strong>Journal Library Search</strong>{" "}
+                    – with filters for date, outline type, and keywords, mirroring the
+                    phone app.
+                  </p>
+                  <p style={styles.goalsDetailText}>
+                    For now, use the library on your phone for searching and filtering
+                    past entries. We’ll wire this panel into the same journal data in
+                    Firebase later.
+                  </p>
+                </div>
+              ) : (
+                <div style={styles.goalsDetailBody}>
+                  <p style={styles.goalsDetailText}>
+                    This pane will mirror the full <strong>{selected.title}</strong>{" "}
+                    outline from your mobile app — prompts, helper bullets, and all.
+                  </p>
+                  <p style={styles.goalsDetailText}>
+                    For now, treat this as a map while we build out each web editor.
+                  </p>
+                </div>
+              )}
+          </section>
+    </div>
+  );
+}
+
+function JournalOutlineDetail({ selected }: { selected: any }) {
+  return (
+    <div style={styles.goalsDetailBody}>
+      <p style={styles.goalsDetailText}>
+        This pane will become the full{" "}
+        <strong>{selected.title}</strong> outline from your phone app — including
+        prompts, helper text, and save-to-Journal behavior.
+      </p>
+      <p style={styles.goalsDetailText}>
+        For now, use this as a planning map: keep the outline title visible here
+        while you run the full protocol on your phone.
+      </p>
+      <ul style={styles.goalsDetailList}>
+        <li>
+          Each outline will later support rich editing, keyboard helpers, and
+          “Save to Journal” from the web.
+        </li>
+        <li>
+          We&apos;ll sync entries via Firebase so your web and mobile journals
+          stay in lockstep.
+        </li>
+      </ul>
+    </div>
+  );
+}
+
+function JournalSearchDetail() {
+  const [query, setQuery] = useState("");
+
+  return (
+    <div style={styles.goalsDetailBody}>
+      <div style={{ marginBottom: 8 }}>
+        <p style={styles.goalsDetailText}>
+          Search your entire Journal Library by text, outline type, or date
+          range.
+        </p>
+        <p style={styles.goalsDetailText}>
+          This stub will later connect to the same Firestore-backed Journal
+          index your phone app uses.
+        </p>
+      </div>
+
+      <div
+        style={{
+          marginTop: 4,
+          display: "flex",
+          gap: 8,
+          alignItems: "center",
+        }}
+      >
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search journal entries…"
+          style={{
+            flex: 1,
+            borderRadius: 999,
+            border: "1px solid rgba(55,65,81,1)",
+            padding: "8px 14px",
+            fontSize: 13,
+            background: "#020617",
+            color: "#e5e7eb",
+            outline: "none",
+          }}
+        />
+        <button
+          type="button"
+          style={{
+            borderRadius: 999,
+            border: "none",
+            padding: "8px 14px",
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: "pointer",
+            background: "#22c55e",
+            color: "#022c22",
+            whiteSpace: "nowrap",
+          }}
+        >
+          Search
+        </button>
+      </div>
+
+      <div
+        style={{
+          marginTop: 10,
+          borderRadius: 12,
+          border: "1px solid rgba(55,65,81,0.95)",
+          padding: "10px 12px",
+          background: "rgba(15,23,42,0.96)",
+          fontSize: 12,
+          opacity: 0.85,
+        }}
+      >
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>
+          Results (coming soon)
+        </div>
+        <div>
+          We&apos;ll show a list of matching entries here with date, outline
+          type, and a snippet — and let you click through to read the full
+          journal.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FreeFlowDetail() {
+  const [createdAt] = useState<Date>(new Date());
+  const [updatedAt, setUpdatedAt] = useState<Date>(new Date());
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [isEditing, setIsEditing] = useState(true);
+
+  const canSave = title.trim().length > 0 || body.trim().length > 0;
+
+  const formatShort = (d: Date) =>
+    d.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+
+  const handleSave = () => {
+    if (!canSave) return;
+    setUpdatedAt(new Date());
+    // For now this is local-only; later we’ll sync to Firestore/Journal
+    alert("Saved (local only for now). Web journal sync coming later.");
+    setIsEditing(false);
+  };
+
+  const handleEdit = () => {
+    setIsEditing(true);
+  };
+
+  const handleClear = () => {
+    setTitle("");
+    setBody("");
+    setIsEditing(true);
+  };
+
+  return (
+    <div style={styles.csBody}>
+      {/* Created / Updated row */}
+      <div style={{ marginBottom: 4, display: "flex", gap: 8, fontSize: 11 }}>
+        <span>Created {formatShort(createdAt)}</span>
+        <span style={{ opacity: 0.7 }}>•</span>
+        <span style={{ opacity: 0.7 }}>Updated {formatShort(updatedAt)}</span>
+      </div>
+
+      {/* Intro */}
+      <div style={styles.csIntro}>
+        <div style={styles.csIntroTitle}>Free Flow — Talk!</div>
+        <div style={styles.csIntroText}>
+          Dump the full story on the page. No edits, no filters, no fixing.
+          Just keep your fingers moving.
+        </div>
+      </div>
+
+      {/* Title */}
+      <div style={styles.csPillarBlock}>
+        <div style={styles.csPillarHeaderRow}>
+          <span style={styles.csPillarEmoji}>🧠</span>
+          <span style={styles.csPillarTitle}>Title</span>
+        </div>
+        <input
+          type="text"
+          value={title}
+          onChange={(e) => isEditing && setTitle(e.target.value)}
+          placeholder="Give this entry a title…"
+          style={{
+            ...styles.todoInput,
+            marginTop: 6,
+            width: "100%",
+          }}
+        />
+      </div>
+
+      {/* Body */}
+      <div style={styles.csPillarBlock}>
+        <div style={styles.csPillarHeaderRow}>
+          <span style={styles.csPillarEmoji}>📓</span>
+          <span style={styles.csPillarTitle}>Your thoughts</span>
+        </div>
+        <div style={styles.csPillarSubtitle}>
+          Type until the charge drops. Don&apos;t worry about spelling,
+          grammar, or structure.
+        </div>
+        <textarea
+          style={{ ...styles.csTextarea, marginTop: 4 }}
+          placeholder="Start typing and don’t stop..."
+          value={body}
+          onChange={(e) => isEditing && setBody(e.target.value)}
+        />
+      </div>
+
+      {/* Buttons row */}
+      <div style={styles.csSaveRow}>
+        <div style={{ display: "flex", gap: 8 }}>
+          {isEditing ? (
+            <button
+              type="button"
+              style={{
+                ...styles.csSaveButton,
+                opacity: canSave ? 1 : 0.4,
+                cursor: canSave ? "pointer" : "default",
+              }}
+              disabled={!canSave}
+              onClick={handleSave}
+            >
+              Save
+            </button>
+          ) : (
+            <button
+              type="button"
+              style={styles.csSaveButton}
+              onClick={handleEdit}
+            >
+              Edit
+            </button>
+          )}
+
+          <button
+            type="button"
+            style={{
+              ...styles.csSaveButton,
+              background: "transparent",
+              border: "1px solid rgba(148,163,184,0.7)",
+              color: "#e5e7eb",
+            }}
+            onClick={handleClear}
+          >
+            Clear
+          </button>
+        </div>
+
+        <div style={styles.csSaveHint}>
+          For now, this entry is stored in this browser only. Later we’ll sync
+          Free Flow to the same Journal tables your phone app uses.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GratitudeDetail() {
+  const [createdAt] = useState<Date>(new Date());
+  const [updatedAt, setUpdatedAt] = useState<Date>(new Date());
+  const [title, setTitle] = useState("Gratitude");
+
+  const seedBody = "Today, I am grateful for:\n\n";
+  const [body, setBody] = useState(seedBody);
+  const [isEditing, setIsEditing] = useState(true);
+
+  const canSave =
+    title.trim().length > 0 ||
+    (body.trim().length > 0 && body.trim() !== "Today, I am grateful for:");
+
+  const formatShort = (d: Date) =>
+    d.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+
+  const handleSave = () => {
+    if (!canSave) return;
+    setUpdatedAt(new Date());
+    // Stub: later, push this into the real Journal store / Firestore
+    alert("Gratitude entry saved (local only for now). Web sync coming later.");
+    setIsEditing(false);
+  };
+
+  const handleEdit = () => {
+    setIsEditing(true);
+  };
+
+  const handleClear = () => {
+    setTitle("Gratitude");
+    setBody(seedBody);
+    setIsEditing(true);
+  };
+
+  return (
+    <div style={styles.csBody}>
+      {/* Created / Updated row */}
+      <div style={{ marginBottom: 4, display: "flex", gap: 8, fontSize: 11 }}>
+        <span>Created {formatShort(createdAt)}</span>
+        <span style={{ opacity: 0.7 }}>•</span>
+        <span style={{ opacity: 0.7 }}>Updated {formatShort(updatedAt)}</span>
+      </div>
+
+      {/* Intro */}
+      <div style={styles.csIntro}>
+        <div style={styles.csIntroTitle}>Gratitude — Thanks!</div>
+        <div style={styles.csIntroText}>
+          Anchor the day by naming specific people, moments, and gifts you&apos;re
+          grateful for.
+        </div>
+      </div>
+
+      {/* Title */}
+      <div style={styles.csPillarBlock}>
+        <div style={styles.csPillarHeaderRow}>
+          <span style={styles.csPillarEmoji}>🙏</span>
+          <span style={styles.csPillarTitle}>Title</span>
+        </div>
+        <input
+          type="text"
+          value={title}
+          onChange={(e) => isEditing && setTitle(e.target.value)}
+          placeholder="Gratitude"
+          style={{
+            ...styles.todoInput,
+            marginTop: 6,
+            width: "100%",
+          }}
+        />
+      </div>
+
+      {/* Body */}
+      <div style={styles.csPillarBlock}>
+        <div style={styles.csPillarHeaderRow}>
+          <span style={styles.csPillarEmoji}>✨</span>
+          <span style={styles.csPillarTitle}>Today, I am grateful for…</span>
+        </div>
+        <div style={styles.csPillarSubtitle}>
+          List concrete things: names, events, sights, sounds, smells. The more
+          specific, the more your nervous system can re-live the blessing.
+        </div>
+        <textarea
+          style={{ ...styles.csTextarea, marginTop: 4 }}
+          value={body}
+          onChange={(e) => isEditing && setBody(e.target.value)}
+        />
+      </div>
+
+      {/* Buttons row */}
+      <div style={styles.csSaveRow}>
+        <div style={{ display: "flex", gap: 8 }}>
+          {isEditing ? (
+            <button
+              type="button"
+              style={{
+                ...styles.csSaveButton,
+                opacity: canSave ? 1 : 0.4,
+                cursor: canSave ? "pointer" : "default",
+              }}
+              disabled={!canSave}
+              onClick={handleSave}
+            >
+              Save
+            </button>
+          ) : (
+            <button
+              type="button"
+              style={styles.csSaveButton}
+              onClick={handleEdit}
+            >
+              Edit
+            </button>
+          )}
+
+          <button
+            type="button"
+            style={{
+              ...styles.csSaveButton,
+              background: "transparent",
+              border: "1px solid rgba(148,163,184,0.7)",
+              color: "#e5e7eb",
+            }}
+            onClick={handleClear}
+          >
+            Clear
+          </button>
+        </div>
+
+        <div style={styles.csSaveHint}>
+          For now, this Gratitude entry lives only in this browser. Later we’ll
+          sync it with the same journal tables your phone uses.
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function GoalsScreen() {
   type GoalKey = "current" | "destiny" | "yearly" | "seasonal" | "monthly";
@@ -2271,6 +2922,12 @@ const styles: any = {
   shieldIcon: {
     fontSize: "16px",
   },
+  shieldImage: {
+    width: 32,
+    height: 32,
+    borderRadius: "999px",
+    objectFit: "contain",
+  },
   shieldLabel: {
     fontSize: "12px",
     opacity: 0.85,
@@ -2344,6 +3001,62 @@ const styles: any = {
     fontWeight: 500,
     color: "#e5e7eb",
     cursor: "pointer",
+  },
+    shieldImageSmall: {
+    width: 26,
+    height: 26,
+    borderRadius: "999px",
+    objectFit: "cover",
+    border: "1px solid rgba(148,163,184,0.7)",
+    background: "rgba(15,23,42,0.9)",
+  },
+
+  shieldModalOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(15,23,42,0.78)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 50,
+  },
+
+  shieldModalInner: {
+    position: "relative",
+    borderRadius: "18px",
+    padding: "16px 18px 18px",
+    background:
+      "radial-gradient(circle at top left, rgba(34,197,94,0.08), rgba(15,23,42,1))",
+    border: "1px solid rgba(51,65,85,0.95)",
+    boxShadow: "0 22px 60px rgba(0,0,0,0.8)",
+    maxWidth: "90vw",
+    maxHeight: "90vh",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "12px",
+  },
+
+  shieldModalImage: {
+    maxWidth: "70vw",
+    maxHeight: "60vh",
+    objectFit: "contain",
+    borderRadius: "14px",
+    border: "1px solid rgba(148,163,184,0.4)",
+    background: "#020617",
+  },
+
+  shieldModalCloseButton: {
+    marginTop: "4px",
+    alignSelf: "center",
+    borderRadius: "999px",
+    border: "1px solid rgba(148,163,184,0.8)",
+    padding: "6px 14px",
+    fontSize: "13px",
+    fontWeight: 500,
+    cursor: "pointer",
+    background: "rgba(15,23,42,0.96)",
+    color: "#e5e7eb",
   },
 
   // nav row
