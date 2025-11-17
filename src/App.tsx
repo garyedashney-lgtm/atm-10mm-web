@@ -166,7 +166,7 @@ function App() {
 
     // --- Header title / subtitle / icon by section ---
   let headerTitle = "";
-  let headerSubtitle = "ATM 10MM · Web Companion";
+  let headerSubtitle = "ATM 10MM App · Web Companion";
   let headerIcon = "";
 
   switch (activeSection) {
