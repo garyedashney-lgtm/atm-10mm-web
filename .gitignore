@@ -27,3 +27,4 @@ dist
 .env
 .DS_Store
 .firebase
+src/App_web_old.tsx

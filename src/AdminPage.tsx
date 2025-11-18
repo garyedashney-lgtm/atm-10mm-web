@@ -28,6 +28,7 @@ const ADMIN_EMAILS = [
 
 const ALLOWLIST_COLLECTION = "allowlist";
 const USERS_COLLECTION = "users";
+const SQUADS_COLLECTION = "squads";
 
 type Tier = "free" | "amateur" | "pro";
 
@@ -35,6 +36,7 @@ interface AllowlistEntry {
   id: string; // doc id = emailLower
   email: string;
   tier: Tier;
+  squadID?: string | null;
 }
 
 interface UserEntry {
@@ -42,6 +44,12 @@ interface UserEntry {
   email: string;
   displayName: string;
   tier?: Tier | null; // missing = free
+  squadID?: string | null;
+}
+
+interface SquadOption {
+  id: string;
+  name: string;
 }
 
 const googleProvider = new GoogleAuthProvider();
@@ -58,10 +66,7 @@ const AdminPage: React.FC = () => {
   const [loadingAllowlist, setLoadingAllowlist] = useState(false);
   const [newEmail, setNewEmail] = useState("");
   const [newTier, setNewTier] = useState<Tier>("free");
-  const [searchAllowlist, setSearchAllowlist] = useState("");
-  const [tierFilterAllowlist, setTierFilterAllowlist] = useState<Tier | "all">(
-    "all"
-  );
+  const [newSquadID, setNewSquadID] = useState("");
 
   // --- users state ---
   const [userEntries, setUserEntries] = useState<UserEntry[]>([]);
@@ -69,9 +74,30 @@ const AdminPage: React.FC = () => {
   const [searchUsers, setSearchUsers] = useState("");
   const [tierFilterUsers, setTierFilterUsers] = useState<Tier | "all">("all");
 
+  // --- squads state ---
+  const [squadOptions, setSquadOptions] = useState<SquadOption[]>([]);
+  const [loadingSquads, setLoadingSquads] = useState(false);
+
   // shared
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // per-row "recently saved" state
+  const [recentAllowlistSavedId, setRecentAllowlistSavedId] = useState<string | null>(null);
+  const [recentUserSavedId, setRecentUserSavedId] = useState<string | null>(null);
+
+  // auto-clear "recently saved" indicators after 2.5 seconds
+  useEffect(() => {
+    if (!recentAllowlistSavedId) return;
+    const t = setTimeout(() => setRecentAllowlistSavedId(null), 2500);
+    return () => clearTimeout(t);
+  }, [recentAllowlistSavedId]);
+
+  useEffect(() => {
+    if (!recentUserSavedId) return;
+    const t = setTimeout(() => setRecentUserSavedId(null), 2500);
+    return () => clearTimeout(t);
+  }, [recentUserSavedId]);
 
   // --- Auth state listener ---
   useEffect(() => {
@@ -98,10 +124,12 @@ const AdminPage: React.FC = () => {
         const data = d.data() as any;
         const email = (data.email || d.id || "").toString();
         const tier = (data.tier || "free") as Tier;
+        const squadID = (data.squadID ?? null) as string | null;
         list.push({
           id: d.id,
           email,
           tier,
+          squadID,
         });
       });
       list.sort((a, b) => a.email.localeCompare(b.email));
@@ -132,11 +160,13 @@ const AdminPage: React.FC = () => {
         ).toString();
         const displayName = (data.displayName || "").toString();
         const tier = (data.tier ?? null) as Tier | null;
+        const squadID = (data.squadID ?? null) as string | null;
         list.push({
           id: d.id,
           email,
           displayName,
           tier,
+          squadID,
         });
       });
       list.sort((a, b) => a.email.localeCompare(b.email));
@@ -149,14 +179,61 @@ const AdminPage: React.FC = () => {
     }
   };
 
+  // --- Load squads (for dropdowns) ---
+  const loadSquads = async () => {
+    if (!isAdmin) return;
+    setLoadingSquads(true);
+    try {
+      const snap = await getDocs(collection(db, SQUADS_COLLECTION));
+      const list: SquadOption[] = [];
+      snap.forEach((d) => {
+        const data = d.data() as any;
+        const name = (data.name || d.id || "").toString();
+        if (name.trim()) {
+          list.push({ id: d.id, name });
+        }
+      });
+
+      // If no squads yet, seed defaults
+      if (list.length === 0) {
+        const defaults = [
+          "Morning Oaks",
+          "Matinee Monsters",
+          "Wednesday Warriors",
+        ];
+        const created: SquadOption[] = [];
+        for (const name of defaults) {
+          const ref = doc(collection(db, SQUADS_COLLECTION));
+          await setDoc(ref, {
+            name,
+            createdAt: serverTimestamp(),
+          });
+          created.push({ id: ref.id, name });
+        }
+        created.sort((a, b) => a.name.localeCompare(b.name));
+        setSquadOptions(created);
+      } else {
+        list.sort((a, b) => a.name.localeCompare(b.name));
+        setSquadOptions(list);
+      }
+    } catch (e: any) {
+      console.error(e);
+      setError((prev) => prev || e.message || "Failed to load squads.");
+    } finally {
+      setLoadingSquads(false);
+    }
+  };
+
   // reload when we become admin
   useEffect(() => {
     if (isAdmin) {
       loadAllowlist();
       loadUsers();
+      loadSquads();
     } else {
       setAllowlistEntries([]);
       setUserEntries([]);
+      setSquadOptions([]);
     }
   }, [isAdmin]);
 
@@ -174,6 +251,77 @@ const AdminPage: React.FC = () => {
     await signOut(auth);
   };
 
+  // --- Squad helpers ---
+
+  const addSquad = async (rawName: string): Promise<string | null> => {
+    const name = rawName.trim();
+    if (!name) return null;
+
+    // Check if it already exists (case-insensitive)
+    const existing = squadOptions.find(
+      (s) => s.name.toLowerCase() === name.toLowerCase()
+    );
+    if (existing) {
+      return existing.name;
+    }
+
+    try {
+      const ref = doc(collection(db, SQUADS_COLLECTION));
+      await setDoc(ref, {
+        name,
+        createdAt: serverTimestamp(),
+      });
+
+      setSquadOptions((prev) => {
+        const next = [...prev, { id: ref.id, name }];
+        next.sort((a, b) => a.name.localeCompare(b.name));
+        return next;
+      });
+
+      return name;
+    } catch (e: any) {
+      console.error(e);
+      setError(e.message || "Failed to add new squad.");
+      return null;
+    }
+  };
+
+  const handleAllowlistSquadSelectChange = async (id: string, value: string) => {
+    if (value === "__ADD_NEW__") {
+      const input = window.prompt("Enter new squad name:");
+      if (!input) return;
+      const name = await addSquad(input);
+      if (!name) return;
+      setAllowlistEntries((prev) =>
+        prev.map((e) => (e.id === id ? { ...e, squadID: name } : e))
+      );
+    } else {
+      setAllowlistEntries((prev) =>
+        prev.map((e) =>
+          e.id === id ? { ...e, squadID: value || null } : e
+        )
+      );
+    }
+  };
+
+  const handleUserSquadSelectChange = async (id: string, value: string) => {
+    if (value === "__ADD_NEW__") {
+      const input = window.prompt("Enter new squad name:");
+      if (!input) return;
+      const name = await addSquad(input);
+      if (!name) return;
+      setUserEntries((prev) =>
+        prev.map((u) => (u.id === id ? { ...u, squadID: name } : u))
+      );
+    } else {
+      setUserEntries((prev) =>
+        prev.map((u) =>
+          u.id === id ? { ...u, squadID: value || null } : u
+        )
+      );
+    }
+  };
+
   // --- Allowlist handlers ---
 
   const handleAllowlistTierChange = (id: string, tier: Tier) => {
@@ -187,13 +335,26 @@ const AdminPage: React.FC = () => {
     setError(null);
     try {
       const ref = doc(db, ALLOWLIST_COLLECTION, entry.id);
-      await updateDoc(ref, {
+      const squad = (entry.squadID ?? "").toString().trim();
+
+      const updateData: any = {
         tier: entry.tier,
         updatedAt: serverTimestamp(),
-      });
+      };
+
+      if (squad) {
+        updateData.squadID = squad;
+        // Also ensure it's in the squads collection
+        await addSquad(squad);
+      } else {
+        updateData.squadID = deleteField();
+      }
+
+      await updateDoc(ref, updateData);
+      setRecentAllowlistSavedId(entry.id);
     } catch (e: any) {
       console.error(e);
-      setError(e.message || "Failed to update allowlist tier.");
+      setError(e.message || "Failed to update allowlist entry.");
     } finally {
       setSaving(false);
     }
@@ -202,7 +363,7 @@ const AdminPage: React.FC = () => {
   const handleAllowlistDelete = async (entry: AllowlistEntry) => {
     const ok = window.confirm(
       `Delete allowlist entry for ${entry.email}?\n\n` +
-        "This does NOT delete their user account – it only removes their preloaded tier."
+        "This does NOT delete their user account – it only removes their preloaded settings."
     );
     if (!ok) return;
 
@@ -212,6 +373,7 @@ const AdminPage: React.FC = () => {
       const ref = doc(db, ALLOWLIST_COLLECTION, entry.id);
       await deleteDoc(ref);
       await loadAllowlist();
+      // No per-row "saved" indicator needed for delete
     } catch (e: any) {
       console.error(e);
       setError(e.message || "Failed to delete allowlist entry.");
@@ -224,27 +386,78 @@ const AdminPage: React.FC = () => {
     const email = newEmail.trim().toLowerCase();
     if (!email) return;
 
+    const squad = newSquadID.trim();
+
     setSaving(true);
     setError(null);
     try {
       const ref = doc(db, ALLOWLIST_COLLECTION, email);
-      await setDoc(
-        ref,
-        {
-          email,
-          tier: newTier,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
+
+      const payload: any = {
+        email,
+        tier: newTier,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+
+      if (squad) {
+        payload.squadID = squad;
+        await addSquad(squad);
+      } else {
+        payload.squadID = deleteField();
+      }
+
+      await setDoc(ref, payload, { merge: true });
 
       setNewEmail("");
       setNewTier("free");
+      setNewSquadID("");
       await loadAllowlist();
+      // "Saved" indicator will happen when editing rows, so no per-row id here.
     } catch (e: any) {
       console.error(e);
       setError(e.message || "Failed to add/update allowlist entry.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCleanupAllowlist = async () => {
+    if (
+      !window.confirm(
+        "This will delete allowlist entries whose email already has a user record.\n\n" +
+          "This does NOT affect existing users or their access – it only removes stale pre-registration entries.\n\n" +
+          "Continue?"
+      )
+    ) {
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    try {
+      const userEmailSet = new Set(
+        userEntries
+          .map((u) => (u.email || "").toLowerCase())
+          .filter((e) => !!e)
+      );
+
+      const toDelete = allowlistEntries.filter((e) =>
+        userEmailSet.has((e.email || "").toLowerCase())
+      );
+
+      await Promise.all(
+        toDelete.map((entry) =>
+          deleteDoc(doc(db, ALLOWLIST_COLLECTION, entry.id))
+        )
+      );
+
+      if (toDelete.length > 0) {
+        await loadAllowlist();
+      }
+    } catch (e: any) {
+      console.error(e);
+      setError(e.message || "Failed to clean up allowlist.");
     } finally {
       setSaving(false);
     }
@@ -258,28 +471,37 @@ const AdminPage: React.FC = () => {
     );
   };
 
-  const handleUserSaveTier = async (user: UserEntry) => {
+  const handleUserSave = async (user: UserEntry) => {
     setSaving(true);
     setError(null);
     try {
       const ref = doc(db, USERS_COLLECTION, user.id);
 
-      // ❗ If we set them to "free", we REMOVE the tier field
-      // so "no tier field = free" stays true.
+      const updateData: any = {
+        updatedAt: serverTimestamp(),
+      };
+
+      // Tier logic: no field = free
       if (!user.tier || user.tier === "free") {
-        await updateDoc(ref, {
-          tier: deleteField(),
-          updatedAt: serverTimestamp(),
-        });
+        updateData.tier = deleteField();
       } else {
-        await updateDoc(ref, {
-          tier: user.tier,
-          updatedAt: serverTimestamp(),
-        });
+        updateData.tier = user.tier;
       }
+
+      // Squad logic: optional; delete field if blank
+      const squad = (user.squadID ?? "").toString().trim();
+      if (squad) {
+        updateData.squadID = squad;
+        await addSquad(squad);
+      } else {
+        updateData.squadID = deleteField();
+      }
+
+      await updateDoc(ref, updateData);
+      setRecentUserSavedId(user.id);
     } catch (e: any) {
       console.error(e);
-      setError(e.message || "Failed to update user tier.");
+      setError(e.message || "Failed to update user record.");
     } finally {
       setSaving(false);
     }
@@ -291,7 +513,7 @@ const AdminPage: React.FC = () => {
         `Delete Firestore user record for:\n\n${user.displayName || "—"}\n${
           user.email
         }\n\n` +
-          `This ONLY deletes the Firestore doc (stats, tier, etc.).\n` +
+          `This ONLY deletes the Firestore doc (stats, tier, squad, etc.).\n` +
           `It does NOT delete their sign-in account in Firebase Authentication.`
       )
     ) {
@@ -325,15 +547,6 @@ const AdminPage: React.FC = () => {
     },
     { free: 0, amateur: 0, pro: 0 } as Record<Tier, number>
   );
-
-  const filteredAllowlist = allowlistEntries.filter((e) => {
-    const matchesSearch =
-      !searchAllowlist.trim() ||
-      e.email.toLowerCase().includes(searchAllowlist.toLowerCase());
-    const matchesTier =
-      tierFilterAllowlist === "all" || e.tier === tierFilterAllowlist;
-    return matchesSearch && matchesTier;
-  });
 
   // Users stats
   const totalUsers = userEntries.length;
@@ -442,8 +655,8 @@ const AdminPage: React.FC = () => {
                   textAlign: "center",
                 }}
               >
-                Preload tiers via <strong>allowlist</strong> and upgrade existing{" "}
-                <strong>users</strong> after they register.
+                Preload tiers &amp; squads via <strong>allowlist</strong> and
+                upgrade existing <strong>users</strong> after they register.
               </p>
             </div>
           </div>
@@ -458,6 +671,9 @@ const AdminPage: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {/* Error message (if any) */}
+        {error && <p style={errorStyle}>{error}</p>}
 
         {/* Top nav */}
         <div style={navRow}>
@@ -483,8 +699,6 @@ const AdminPage: React.FC = () => {
           </button>
         </div>
 
-        {error && <p style={errorStyle}>{error}</p>}
-
         {/* Scrollable inner content */}
         <div
           style={{
@@ -509,7 +723,9 @@ const AdminPage: React.FC = () => {
                   }}
                 >
                   Add an allowlist entry. When someone registers with this email,
-                  they’ll start with the selected tier.
+                  they’ll start with the selected tier. Optionally set their squad
+                  now; if you leave it blank, you can assign their squad later on
+                  the <strong>Existing Users</strong> tab.
                 </p>
 
                 {/* Add row */}
@@ -518,7 +734,8 @@ const AdminPage: React.FC = () => {
                     display: "flex",
                     gap: 8,
                     marginTop: 10,
-                    marginBottom: 18, // extra space before search area
+                    marginBottom: 18, // extra space before list area
+                    flexWrap: "wrap",
                   }}
                 >
                   <input
@@ -531,12 +748,19 @@ const AdminPage: React.FC = () => {
                   <select
                     value={newTier}
                     onChange={(e) => setNewTier(e.target.value as Tier)}
-                    style={select}
+                    style={getTierSelectStyle(newTier)}
                   >
                     <option value="free">Free</option>
                     <option value="amateur">Amateur</option>
                     <option value="pro">Pro</option>
                   </select>
+                  <input
+                    type="text"
+                    placeholder="Squad ID (optional)"
+                    value={newSquadID}
+                    onChange={(e) => setNewSquadID(e.target.value)}
+                    style={select}
+                  />
                   <button
                     onClick={handleAddOrUpdateAllowlist}
                     style={buttonPrimary}
@@ -546,75 +770,43 @@ const AdminPage: React.FC = () => {
                   </button>
                 </div>
 
-                {/* --- Search area --- */}
-                <h3
-                  style={{
-                    ...sectionSubheading,
-                    marginTop: 20,
-                  }}
-                >
-                  Search &amp; update allowlist entries
-                </h3>
-                <p style={subtle}>
-                  Search by email, adjust the tier in the table below, then click{" "}
-                  <strong>Save</strong>.
-                </p>
-
-                {/* Search + stats */}
+                {/* --- Simple list + cleanup --- */}
+                <h3 style={sectionSubheading}>Current allowlist entries</h3>
                 <div
                   style={{
                     display: "flex",
-                    flexWrap: "wrap",
-                    gap: 8,
-                    alignItems: "center",
                     justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 8,
                     marginBottom: 8,
-                    marginTop: 8,
+                    marginTop: 4,
+                    flexWrap: "wrap",
                   }}
                 >
-                  <input
-                    type="text"
-                    placeholder="Search email…"
-                    value={searchAllowlist}
-                    onChange={(e) => setSearchAllowlist(e.target.value)}
-                    style={searchInput}
-                  />
-
-                  <div style={showingRow}>
-                    <span style={{ marginRight: 8 }}>
-                      Showing{" "}
-                      <strong>{filteredAllowlist.length}</strong> of{" "}
-                      <strong>{totalAllowlist}</strong> entries
-                    </span>
-                    <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
-                      <TierChip
-                        label={`All`}
-                        active={tierFilterAllowlist === "all"}
-                        onClick={() => setTierFilterAllowlist("all")}
-                      />
-                      <TierChip
-                        label={`Free (${allowlistCounts.free})`}
-                        active={tierFilterAllowlist === "free"}
-                        onClick={() => setTierFilterAllowlist("free")}
-                      />
-                      <TierChip
-                        label={`Amateur (${allowlistCounts.amateur})`}
-                        active={tierFilterAllowlist === "amateur"}
-                        onClick={() => setTierFilterAllowlist("amateur")}
-                      />
-                      <TierChip
-                        label={`Pro (${allowlistCounts.pro})`}
-                        active={tierFilterAllowlist === "pro"}
-                        onClick={() => setTierFilterAllowlist("pro")}
-                      />
-                    </span>
-                  </div>
+                  <span style={subtle}>
+                    Total: <strong>{totalAllowlist}</strong>{" "}
+                    {totalAllowlist > 0 && (
+                      <>
+                        · Free {allowlistCounts.free} · Amateur{" "}
+                        {allowlistCounts.amateur} · Pro {allowlistCounts.pro}
+                      </>
+                    )}
+                    {loadingSquads && " · Loading squads…"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleCleanupAllowlist}
+                    style={buttonSmall}
+                    disabled={saving}
+                  >
+                    Clean up allowlist
+                  </button>
                 </div>
 
                 {loadingAllowlist ? (
                   <p>Loading allowlist…</p>
-                ) : filteredAllowlist.length === 0 ? (
-                  <p>No entries match this view.</p>
+                ) : totalAllowlist === 0 ? (
+                  <p>No allowlist entries yet.</p>
                 ) : (
                   <div style={{ overflowX: "auto", marginTop: 8 }}>
                     <table style={table}>
@@ -622,49 +814,83 @@ const AdminPage: React.FC = () => {
                         <tr>
                           <th style={th}>Email</th>
                           <th style={th}>Tier</th>
+                          <th style={th}>Squad</th>
                           <th style={th}>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {filteredAllowlist.map((e) => (
-                          <tr key={e.id}>
-                            <td style={td}>{e.email}</td>
-                            <td style={td}>
-                              <select
-                                value={e.tier}
-                                onChange={(ev) =>
-                                  handleAllowlistTierChange(
-                                    e.id,
-                                    ev.target.value as Tier
-                                  )
-                                }
-                                style={select}
-                              >
-                                <option value="free">Free</option>
-                                <option value="amateur">Amateur</option>
-                                <option value="pro">Pro</option>
-                              </select>
-                            </td>
-                            <td style={td}>
-                              <div style={{ display: "flex", gap: 10 }}>
-                                <button
-                                  onClick={() => handleAllowlistSave(e)}
-                                  style={buttonSuccessSmall}
-                                  disabled={saving}
+                        {allowlistEntries.map((e) => {
+                          const isRecentlySaved =
+                            recentAllowlistSavedId === e.id;
+                          const saveButtonStyle = isRecentlySaved
+                            ? buttonSavedSmall
+                            : buttonSuccessSmall;
+                          const saveButtonLabel = isRecentlySaved
+                            ? "Saved"
+                            : "Save";
+
+                          return (
+                            <tr key={e.id}>
+                              <td style={tdEmail}>{e.email}</td>
+                              <td style={tdTier}>
+                                <select
+                                  value={e.tier}
+                                  onChange={(ev) =>
+                                    handleAllowlistTierChange(
+                                      e.id,
+                                      ev.target.value as Tier
+                                    )
+                                  }
+                                  style={getTierSelectStyle(e.tier)}
                                 >
-                                  Save
-                                </button>
-                                <button
-                                  onClick={() => handleAllowlistDelete(e)}
-                                  style={buttonDangerSmall}
-                                  disabled={saving}
+                                  <option value="free">Free</option>
+                                  <option value="amateur">Amateur</option>
+                                  <option value="pro">Pro</option>
+                                </select>
+                              </td>
+                              <td style={tdSquad}>
+                                <select
+                                  value={e.squadID ?? ""}
+                                  onChange={(ev) =>
+                                    handleAllowlistSquadSelectChange(
+                                      e.id,
+                                      ev.target.value
+                                    )
+                                  }
+                                  style={select}
                                 >
-                                  Delete
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
+                                  <option value="">None</option>
+                                  {squadOptions.map((s) => (
+                                    <option key={s.id} value={s.name}>
+                                      {s.name}
+                                    </option>
+                                  ))}
+                                  <option value="__ADD_NEW__">
+                                    ➕ Add new…
+                                  </option>
+                                </select>
+                              </td>
+                              <td style={tdActions}>
+                                <div style={{ display: "flex", gap: 10 }}>
+                                  <button
+                                    onClick={() => handleAllowlistSave(e)}
+                                    style={saveButtonStyle}
+                                    disabled={saving}
+                                  >
+                                    {saveButtonLabel}
+                                  </button>
+                                  <button
+                                    onClick={() => handleAllowlistDelete(e)}
+                                    style={buttonDangerSmall}
+                                    disabled={saving}
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -680,7 +906,8 @@ const AdminPage: React.FC = () => {
                   These are users who have already signed up. If{" "}
                   <strong>no tier field</strong> is set, they are treated as{" "}
                   <strong>Free</strong>. Changing to Free here will remove the{" "}
-                  <code>tier</code> field again.
+                  <code>tier</code> field again. Squad assignment for leaderboards
+                  lives on this screen in the <code>squadID</code> field.
                 </p>
 
                 {/* Search + stats */}
@@ -744,7 +971,8 @@ const AdminPage: React.FC = () => {
                         <tr>
                           <th style={th}>Display Name</th>
                           <th style={th}>Email</th>
-                          <th style={th}>Effective Tier</th>
+                          <th style={th}>Tier</th>
+                          <th style={th}>Squad</th>
                           <th style={th}>Actions</th>
                         </tr>
                       </thead>
@@ -752,13 +980,19 @@ const AdminPage: React.FC = () => {
                         {filteredUsers.map((u) => {
                           const effectiveTier: Tier = (u.tier || "free") as Tier;
                           const isFreeByMissingField = !u.tier;
+                          const isRecentlySaved = recentUserSavedId === u.id;
+                          const saveButtonStyle = isRecentlySaved
+                            ? buttonSavedSmall
+                            : buttonSuccessSmall;
+                          const saveButtonLabel = isRecentlySaved ? "Saved" : "Save";
+
                           return (
                             <tr key={u.id}>
-                              <td style={td}>{u.displayName || "—"}</td>
-                              <td style={td}>
+                              <td style={tdName}>{u.displayName || "—"}</td>
+                              <td style={tdEmail}>
                                 <div style={{ opacity: 0.8 }}>{u.email}</div>
                               </td>
-                              <td style={td}>
+                              <td style={tdTier}>
                                 <select
                                   value={effectiveTier}
                                   onChange={(ev) =>
@@ -767,7 +1001,7 @@ const AdminPage: React.FC = () => {
                                       ev.target.value as Tier
                                     )
                                   }
-                                  style={select}
+                                  style={getTierSelectStyle(effectiveTier)}
                                 >
                                   <option value="free">
                                     Free
@@ -779,14 +1013,36 @@ const AdminPage: React.FC = () => {
                                   <option value="pro">Pro</option>
                                 </select>
                               </td>
-                              <td style={td}>
+                              <td style={tdSquad}>
+                                <select
+                                  value={u.squadID ?? ""}
+                                  onChange={(ev) =>
+                                    handleUserSquadSelectChange(
+                                      u.id,
+                                      ev.target.value
+                                    )
+                                  }
+                                  style={select}
+                                >
+                                  <option value="">None</option>
+                                  {squadOptions.map((s) => (
+                                    <option key={s.id} value={s.name}>
+                                      {s.name}
+                                    </option>
+                                  ))}
+                                  <option value="__ADD_NEW__">
+                                    ➕ Add new…
+                                  </option>
+                                </select>
+                              </td>
+                              <td style={tdActions}>
                                 <div style={{ display: "flex", gap: 10 }}>
                                   <button
-                                    onClick={() => handleUserSaveTier(u)}
-                                    style={buttonSuccessSmall}
+                                    onClick={() => handleUserSave(u)}
+                                    style={saveButtonStyle}
                                     disabled={saving}
                                   >
-                                    Save
+                                    {saveButtonLabel}
                                   </button>
                                   <button
                                     onClick={() => handleUserDelete(u)}
@@ -837,6 +1093,39 @@ const TierChip: React.FC<TierChipProps> = ({ label, active, onClick }) => (
     {label}
   </button>
 );
+
+// --- Tier select color helper ---
+const getTierSelectStyle = (tier: Tier): React.CSSProperties => {
+  const base: React.CSSProperties = {
+    ...select,
+    textTransform: "capitalize",
+    fontWeight: 600,
+  };
+
+  if (tier === "free") {
+    return {
+      ...base,
+      background: "rgba(148,163,184,0.15)",
+      color: "#e5e7eb",
+      border: "1px solid rgba(148,163,184,0.8)",
+    };
+  }
+  if (tier === "amateur") {
+    return {
+      ...base,
+      background: "rgba(59,130,246,0.18)",
+      color: "#dbeafe",
+      border: "1px solid rgba(59,130,246,0.9)",
+    };
+  }
+  // pro
+  return {
+    ...base,
+    background: "rgba(34,197,94,0.18)",
+    color: "#bbf7d0",
+    border: "1px solid rgba(34,197,94,0.9)",
+  };
+};
 
 // --- minimal inline styles ---
 const page: React.CSSProperties = {
@@ -907,6 +1196,13 @@ const buttonSuccessSmall: React.CSSProperties = {
   background: "rgba(34, 197, 94, 0.12)", // subtle green tint
 };
 
+const buttonSavedSmall: React.CSSProperties = {
+  ...buttonSmall,
+  border: "1px solid #9ca3af",
+  color: "#e5e7eb",
+  background: "rgba(148,163,184,0.2)",
+};
+
 const buttonDangerSmall: React.CSSProperties = {
   ...buttonSmall,
   background: "transparent",
@@ -920,6 +1216,7 @@ const inputBase: React.CSSProperties = {
   border: "1px solid #4b5563",
   background: "#020617",
   color: "#e5e7eb",
+  fontSize: 13,
 };
 
 const searchInput: React.CSSProperties = {
@@ -937,17 +1234,49 @@ const table: React.CSSProperties = {
   width: "100%",
   borderCollapse: "collapse",
   fontSize: 14,
+  tableLayout: "auto",
 };
 
 const th: React.CSSProperties = {
   textAlign: "left",
   padding: "8px 6px",
   borderBottom: "1px solid #1f2937",
+  fontWeight: 600,
+  fontSize: 13,
+  whiteSpace: "nowrap",
 };
 
-const td: React.CSSProperties = {
+const tdBase: React.CSSProperties = {
   padding: "6px 6px",
   borderBottom: "1px solid #111827",
+  verticalAlign: "middle",
+  fontSize: 13,
+};
+
+const tdName: React.CSSProperties = {
+  ...tdBase,
+  maxWidth: 220,
+};
+
+const tdEmail: React.CSSProperties = {
+  ...tdBase,
+  maxWidth: 260,
+  wordBreak: "break-all",
+};
+
+const tdTier: React.CSSProperties = {
+  ...tdBase,
+  whiteSpace: "nowrap",
+};
+
+const tdSquad: React.CSSProperties = {
+  ...tdBase,
+  whiteSpace: "nowrap",
+};
+
+const tdActions: React.CSSProperties = {
+  ...tdBase,
+  minWidth: 150,
 };
 
 const subtle: React.CSSProperties = {
