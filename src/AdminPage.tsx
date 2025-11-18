@@ -502,7 +502,6 @@ const AdminPage: React.FC = () => {
 
                 {/* --- Add area --- */}
                 <h3 style={sectionSubheading}>Add allowlist entry</h3>
-                <div style={subheadingDivider}></div>
                 <p
                   style={{
                     ...subtle,
@@ -556,7 +555,6 @@ const AdminPage: React.FC = () => {
                 >
                   Search &amp; update allowlist entries
                 </h3>
-                <div style={subheadingDivider}></div>
                 <p style={subtle}>
                   Search by email, adjust the tier in the table below, then click{" "}
                   <strong>Save</strong>.
@@ -782,10 +780,10 @@ const AdminPage: React.FC = () => {
                                 </select>
                               </td>
                               <td style={td}>
-                                <div style={{ display: "flex", gap: 6 }}>
+                                <div style={{ display: "flex", gap: 10 }}>
                                   <button
                                     onClick={() => handleUserSaveTier(u)}
-                                    style={buttonSmall}
+                                    style={buttonSuccessSmall}
                                     disabled={saving}
                                   >
                                     Save
@@ -958,20 +956,10 @@ const subtle: React.CSSProperties = {
 };
 
 const sectionSubheading: React.CSSProperties = {
-  fontSize: 15,
+  fontSize: 14,
   fontWeight: 700,
-  marginTop: 18,
-  marginBottom: 6,
-  color: "#f1f5f9",
-};
-
-const subheadingDivider: React.CSSProperties = {
-  height: 2,
-  width: "100%",
-  background: "linear-gradient(to right, #22c55e33, transparent)",
-  marginTop: 4,
-  marginBottom: 12,
-  borderRadius: 2,
+  marginTop: 12,
+  marginBottom: 4,
 };
 
 const errorStyle: React.CSSProperties = {
