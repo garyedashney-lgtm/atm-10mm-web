@@ -20,6 +20,39 @@ import {
 } from "firebase/firestore";
 import { auth, db } from "./firebase";
 
+// --- CSV helpers ------------------------------------------------------------
+
+function csvValue(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  const s = String(v);
+  // Escape quotes + wrap in quotes if needed
+  if (/[",\n]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+function downloadCsv(
+  filename: string,
+  headers: string[],
+  rows: (string | number | null | undefined)[][]
+) {
+  const headerLine = headers.map(csvValue).join(",");
+  const lines = rows.map((row) => row.map(csvValue).join(","));
+  const csv = [headerLine, ...lines].join("\r\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+
+  const link = document.createElement("a");
+  link.href = url;
+  link.setAttribute("download", filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 // 🔐 Only these Google accounts can access the admin console.
 const ADMIN_EMAILS = [
   "garyedashney@gmail.com",
@@ -536,6 +569,36 @@ const AdminPage: React.FC = () => {
     }
   };
 
+  // --- CSV download handlers ---
+
+  const handleDownloadAllowlistCsv = () => {
+    if (allowlistEntries.length === 0) return;
+
+    const headers = ["email", "tier", "squadID"];
+    const rows = allowlistEntries.map((e) => [
+      e.email,
+      e.tier,
+      e.squadID ?? "",
+    ]);
+
+    downloadCsv("preload-allowlist.csv", headers, rows);
+  };
+
+  const handleDownloadUsersCsv = () => {
+    if (userEntries.length === 0) return;
+
+    const headers = ["uid", "email", "displayName", "tier", "squadID"];
+    const rows = userEntries.map((u) => [
+      u.id,
+      u.email,
+      u.displayName,
+      u.tier ?? "free",
+      u.squadID ?? "",
+    ]);
+
+    downloadCsv("existing-users.csv", headers, rows);
+  };
+
   // --- Derived filtered lists + stats ---
 
   // Allowlist stats
@@ -712,7 +775,27 @@ const AdminPage: React.FC = () => {
             // --- PRELOAD / ALLOWLIST TAB ---
             <section>
               <div style={sectionCard}>
-                <h2 style={{ marginTop: 0 }}>Preload Access (allowlist)</h2>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 8,
+                    marginBottom: 8,
+                  }}
+                >
+                  <h2 style={{ marginTop: 0, marginBottom: 0 }}>
+                    Preload Access (allowlist)
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={handleDownloadAllowlistCsv}
+                    style={buttonSmall}
+                    disabled={allowlistEntries.length === 0}
+                  >
+                    Download CSV
+                  </button>
+                </div>
 
                 {/* --- Add area --- */}
                 <h3 style={sectionSubheading}>Add allowlist entry</h3>
@@ -901,7 +984,28 @@ const AdminPage: React.FC = () => {
             // --- USERS TAB ---
             <section>
               <div style={sectionCard}>
-                <h2 style={{ marginTop: 0 }}>Existing Users (users collection)</h2>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 8,
+                    marginBottom: 8,
+                  }}
+                >
+                  <h2 style={{ marginTop: 0, marginBottom: 0 }}>
+                    Existing Users (users collection)
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={handleDownloadUsersCsv}
+                    style={buttonSmall}
+                    disabled={userEntries.length === 0}
+                  >
+                    Download CSV
+                  </button>
+                </div>
+
                 <p style={subtle}>
                   These are users who have already signed up. If{" "}
                   <strong>no tier field</strong> is set, they are treated as{" "}
@@ -1191,9 +1295,9 @@ const buttonSmall: React.CSSProperties = {
 
 const buttonSuccessSmall: React.CSSProperties = {
   ...buttonSmall,
-  border: "1px solid #22c55e", // green outline
-  color: "#bbf7d0", // soft green text
-  background: "rgba(34, 197, 94, 0.12)", // subtle green tint
+  border: "1px solid #22c55e",
+  color: "#bbf7d0",
+  background: "rgba(34, 197, 94, 0.12)",
 };
 
 const buttonSavedSmall: React.CSSProperties = {
