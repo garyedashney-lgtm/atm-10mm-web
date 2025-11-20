@@ -10,13 +10,13 @@ import {
 } from "firebase/auth";
 import {
   collection,
-  getDocs,
   doc,
   updateDoc,
   setDoc,
   serverTimestamp,
   deleteField,
   deleteDoc,
+  onSnapshot,
 } from "firebase/firestore";
 import { auth, db } from "./firebase";
 
@@ -25,7 +25,6 @@ import { auth, db } from "./firebase";
 function csvValue(v: unknown): string {
   if (v === null || v === undefined) return "";
   const s = String(v);
-  // Escape quotes + wrap in quotes if needed
   if (/[",\n]/.test(s)) {
     return `"${s.replace(/"/g, '""')}"`;
   }
@@ -115,23 +114,6 @@ const AdminPage: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // per-row "recently saved" state
-  const [recentAllowlistSavedId, setRecentAllowlistSavedId] = useState<string | null>(null);
-  const [recentUserSavedId, setRecentUserSavedId] = useState<string | null>(null);
-
-  // auto-clear "recently saved" indicators after 2.5 seconds
-  useEffect(() => {
-    if (!recentAllowlistSavedId) return;
-    const t = setTimeout(() => setRecentAllowlistSavedId(null), 2500);
-    return () => clearTimeout(t);
-  }, [recentAllowlistSavedId]);
-
-  useEffect(() => {
-    if (!recentUserSavedId) return;
-    const t = setTimeout(() => setRecentUserSavedId(null), 2500);
-    return () => clearTimeout(t);
-  }, [recentUserSavedId]);
-
   // --- Auth state listener ---
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
@@ -145,129 +127,120 @@ const AdminPage: React.FC = () => {
     return () => unsub();
   }, []);
 
-  // --- Load allowlist ---
-  const loadAllowlist = async () => {
-    if (!isAdmin) return;
-    setLoadingAllowlist(true);
-    setError(null);
-    try {
-      const snap = await getDocs(collection(db, ALLOWLIST_COLLECTION));
-      const list: AllowlistEntry[] = [];
-      snap.forEach((d) => {
-        const data = d.data() as any;
-        const email = (data.email || d.id || "").toString();
-        const tier = (data.tier || "free") as Tier;
-        const squadID = (data.squadID ?? null) as string | null;
-        list.push({
-          id: d.id,
-          email,
-          tier,
-          squadID,
-        });
-      });
-      list.sort((a, b) => a.email.localeCompare(b.email));
-      setAllowlistEntries(list);
-    } catch (e: any) {
-      console.error(e);
-      setError(e.message || "Failed to load allowlist.");
-    } finally {
-      setLoadingAllowlist(false);
-    }
-  };
 
-  // --- Load users ---
-  const loadUsers = async () => {
-    if (!isAdmin) return;
-    setLoadingUsers(true);
-    setError(null);
-    try {
-      const snap = await getDocs(collection(db, USERS_COLLECTION));
-      const list: UserEntry[] = [];
-      snap.forEach((d) => {
-        const data = d.data() as any;
-        const email = (
-          data.emailLower ||
-          data.email ||
-          d.id ||
-          ""
-        ).toString();
-        const displayName = (data.displayName || "").toString();
-        const tier = (data.tier ?? null) as Tier | null;
-        const squadID = (data.squadID ?? null) as string | null;
-        list.push({
-          id: d.id,
-          email,
-          displayName,
-          tier,
-          squadID,
-        });
-      });
-      list.sort((a, b) => a.email.localeCompare(b.email));
-      setUserEntries(list);
-    } catch (e: any) {
-      console.error(e);
-      setError(e.message || "Failed to load users.");
-    } finally {
-      setLoadingUsers(false);
-    }
-  };
+  // --- REALTIME LISTENERS (no flicker, live data) ---
 
-  // --- Load squads (for dropdowns) ---
-  const loadSquads = async () => {
-    if (!isAdmin) return;
-    setLoadingSquads(true);
-    try {
-      const snap = await getDocs(collection(db, SQUADS_COLLECTION));
-      const list: SquadOption[] = [];
-      snap.forEach((d) => {
-        const data = d.data() as any;
-        const name = (data.name || d.id || "").toString();
-        if (name.trim()) {
-          list.push({ id: d.id, name });
-        }
-      });
-
-      // If no squads yet, seed defaults
-      if (list.length === 0) {
-        const defaults = [
-          "Morning Oaks",
-          "Matinee Monsters",
-          "Wednesday Warriors",
-        ];
-        const created: SquadOption[] = [];
-        for (const name of defaults) {
-          const ref = doc(collection(db, SQUADS_COLLECTION));
-          await setDoc(ref, {
-            name,
-            createdAt: serverTimestamp(),
-          });
-          created.push({ id: ref.id, name });
-        }
-        created.sort((a, b) => a.name.localeCompare(b.name));
-        setSquadOptions(created);
-      } else {
-        list.sort((a, b) => a.name.localeCompare(b.name));
-        setSquadOptions(list);
-      }
-    } catch (e: any) {
-      console.error(e);
-      setError((prev) => prev || e.message || "Failed to load squads.");
-    } finally {
-      setLoadingSquads(false);
-    }
-  };
-
-  // reload when we become admin
   useEffect(() => {
-    if (isAdmin) {
-      loadAllowlist();
-      loadUsers();
-      loadSquads();
-    } else {
+    if (!isAdmin) {
       setAllowlistEntries([]);
       setUserEntries([]);
       setSquadOptions([]);
+      return;
     }
+
+    // allowlist
+    setLoadingAllowlist(true);
+    const allowlistUnsub = onSnapshot(
+      collection(db, ALLOWLIST_COLLECTION),
+      (snap) => {
+        const list: AllowlistEntry[] = [];
+        snap.forEach((d) => {
+          const data = d.data() as any;
+          const email = (data.email || d.id || "").toString();
+          const tier = (data.tier || "free") as Tier;
+          const squadID = (data.squadID ?? null) as string | null;
+          list.push({ id: d.id, email, tier, squadID });
+        });
+        list.sort((a, b) => a.email.localeCompare(b.email));
+        setAllowlistEntries(list);
+        setLoadingAllowlist(false);
+      },
+      (err) => {
+        console.error(err);
+        setError((prev) => prev || err.message || "Failed to listen to allowlist.");
+        setLoadingAllowlist(false);
+      }
+    );
+
+    // users
+    setLoadingUsers(true);
+    const usersUnsub = onSnapshot(
+      collection(db, USERS_COLLECTION),
+      (snap) => {
+        const list: UserEntry[] = [];
+        snap.forEach((d) => {
+          const data = d.data() as any;
+          const email = (
+            data.emailLower ||
+            data.email ||
+            d.id ||
+            ""
+          ).toString();
+          const displayName = (data.displayName || "").toString();
+          const tier = (data.tier ?? null) as Tier | null;
+          const squadID = (data.squadID ?? null) as string | null;
+          list.push({ id: d.id, email, displayName, tier, squadID });
+        });
+        list.sort((a, b) => a.email.localeCompare(b.email));
+        setUserEntries(list);
+        setLoadingUsers(false);
+      },
+      (err) => {
+        console.error(err);
+        setError((prev) => prev || err.message || "Failed to listen to users.");
+        setLoadingUsers(false);
+      }
+    );
+
+    // squads
+    setLoadingSquads(true);
+    const squadsUnsub = onSnapshot(
+      collection(db, SQUADS_COLLECTION),
+      async (snap) => {
+        const list: SquadOption[] = [];
+        snap.forEach((d) => {
+          const data = d.data() as any;
+          const name = (data.name || d.id || "").toString();
+          if (name.trim()) {
+            list.push({ id: d.id, name });
+          }
+        });
+
+        if (list.length === 0) {
+          const defaults = [
+            "Morning Oaks",
+            "Matinee Monsters",
+            "Wednesday Warriors",
+          ];
+          const created: SquadOption[] = [];
+          for (const name of defaults) {
+            const ref = doc(collection(db, SQUADS_COLLECTION));
+            await setDoc(ref, {
+              name,
+              createdAt: serverTimestamp(),
+            });
+            created.push({ id: ref.id, name });
+          }
+          created.sort((a, b) => a.name.localeCompare(b.name));
+          setSquadOptions(created);
+        } else {
+          list.sort((a, b) => a.name.localeCompare(b.name));
+          setSquadOptions(list);
+        }
+        setLoadingSquads(false);
+      },
+      (err) => {
+        console.error(err);
+        setError((prev) => prev || err.message || "Failed to listen to squads.");
+        setLoadingSquads(false);
+      }
+    );
+
+    return () => {
+      allowlistUnsub();
+      usersUnsub();
+      squadsUnsub();
+    };
   }, [isAdmin]);
 
   const handleSignIn = async () => {
@@ -290,7 +263,7 @@ const AdminPage: React.FC = () => {
     const name = rawName.trim();
     if (!name) return null;
 
-    // Check if it already exists (case-insensitive)
+    // Check existing (case-insensitive)
     const existing = squadOptions.find(
       (s) => s.name.toLowerCase() === name.toLowerCase()
     );
@@ -305,6 +278,7 @@ const AdminPage: React.FC = () => {
         createdAt: serverTimestamp(),
       });
 
+      // onSnapshot will eventually update; but also update local eagerly
       setSquadOptions((prev) => {
         const next = [...prev, { id: ref.id, name }];
         next.sort((a, b) => a.name.localeCompare(b.name));
@@ -319,53 +293,9 @@ const AdminPage: React.FC = () => {
     }
   };
 
-  const handleAllowlistSquadSelectChange = async (id: string, value: string) => {
-    if (value === "__ADD_NEW__") {
-      const input = window.prompt("Enter new squad name:");
-      if (!input) return;
-      const name = await addSquad(input);
-      if (!name) return;
-      setAllowlistEntries((prev) =>
-        prev.map((e) => (e.id === id ? { ...e, squadID: name } : e))
-      );
-    } else {
-      setAllowlistEntries((prev) =>
-        prev.map((e) =>
-          e.id === id ? { ...e, squadID: value || null } : e
-        )
-      );
-    }
-  };
+  // --- Auto-persist helpers (no Save buttons) ---
 
-  const handleUserSquadSelectChange = async (id: string, value: string) => {
-    if (value === "__ADD_NEW__") {
-      const input = window.prompt("Enter new squad name:");
-      if (!input) return;
-      const name = await addSquad(input);
-      if (!name) return;
-      setUserEntries((prev) =>
-        prev.map((u) => (u.id === id ? { ...u, squadID: name } : u))
-      );
-    } else {
-      setUserEntries((prev) =>
-        prev.map((u) =>
-          u.id === id ? { ...u, squadID: value || null } : u
-        )
-      );
-    }
-  };
-
-  // --- Allowlist handlers ---
-
-  const handleAllowlistTierChange = (id: string, tier: Tier) => {
-    setAllowlistEntries((prev) =>
-      prev.map((e) => (e.id === id ? { ...e, tier } : e))
-    );
-  };
-
-  const handleAllowlistSave = async (entry: AllowlistEntry) => {
-    setSaving(true);
-    setError(null);
+  const persistAllowlistEntry = async (entry: AllowlistEntry) => {
     try {
       const ref = doc(db, ALLOWLIST_COLLECTION, entry.id);
       const squad = (entry.squadID ?? "").toString().trim();
@@ -377,19 +307,83 @@ const AdminPage: React.FC = () => {
 
       if (squad) {
         updateData.squadID = squad;
-        // Also ensure it's in the squads collection
         await addSquad(squad);
       } else {
         updateData.squadID = deleteField();
       }
 
       await updateDoc(ref, updateData);
-      setRecentAllowlistSavedId(entry.id);
     } catch (e: any) {
       console.error(e);
-      setError(e.message || "Failed to update allowlist entry.");
-    } finally {
-      setSaving(false);
+      setError(e.message || "Failed to auto-save allowlist entry.");
+    }
+  };
+
+  const persistUserEntry = async (user: UserEntry) => {
+    try {
+      const ref = doc(db, USERS_COLLECTION, user.id);
+      const updateData: any = {
+        updatedAt: serverTimestamp(),
+      };
+
+      if (!user.tier || user.tier === "free") {
+        updateData.tier = deleteField();
+      } else {
+        updateData.tier = user.tier;
+      }
+
+      const squad = (user.squadID ?? "").toString().trim();
+      if (squad) {
+        updateData.squadID = squad;
+        await addSquad(squad);
+      } else {
+        updateData.squadID = deleteField();
+      }
+
+      await updateDoc(ref, updateData);
+    } catch (e: any) {
+      console.error(e);
+      setError(e.message || "Failed to auto-save user record.");
+    }
+  };
+
+  // --- Allowlist handlers ---
+
+  const handleAllowlistTierChange = (id: string, tier: Tier) => {
+    setAllowlistEntries((prev) => {
+      const prevEntry = prev.find((e) => e.id === id);
+      if (!prevEntry) return prev;
+      const updatedEntry: AllowlistEntry = { ...prevEntry, tier };
+      void persistAllowlistEntry(updatedEntry);
+      return prev.map((e) => (e.id === id ? updatedEntry : e));
+    });
+  };
+
+  const handleAllowlistSquadSelectChange = async (id: string, value: string) => {
+    if (value === "__ADD_NEW__") {
+      const input = window.prompt("Enter new squad name:");
+      if (!input) return;
+      const name = await addSquad(input);
+      if (!name) return;
+
+      setAllowlistEntries((prev) => {
+        const prevEntry = prev.find((e) => e.id === id);
+        if (!prevEntry) return prev;
+        const updatedEntry: AllowlistEntry = { ...prevEntry, squadID: name };
+        void persistAllowlistEntry(updatedEntry);
+        return prev.map((e) => (e.id === id ? updatedEntry : e));
+      });
+    } else {
+      setAllowlistEntries((prev) => {
+        const prevEntry = prev.find((e) => e.id === id);
+        if (!prevEntry) return prev;
+        const updatedEntry: AllowlistEntry = {
+          ...prevEntry,
+          squadID: value || null,
+        };
+        void persistAllowlistEntry(updatedEntry);
+        return prev.map((e) => (e.id === id ? updatedEntry : e));
+      });
     }
   };
 
@@ -405,8 +399,7 @@ const AdminPage: React.FC = () => {
     try {
       const ref = doc(db, ALLOWLIST_COLLECTION, entry.id);
       await deleteDoc(ref);
-      await loadAllowlist();
-      // No per-row "saved" indicator needed for delete
+      // onSnapshot will update UI
     } catch (e: any) {
       console.error(e);
       setError(e.message || "Failed to delete allowlist entry.");
@@ -445,8 +438,7 @@ const AdminPage: React.FC = () => {
       setNewEmail("");
       setNewTier("free");
       setNewSquadID("");
-      await loadAllowlist();
-      // "Saved" indicator will happen when editing rows, so no per-row id here.
+      // list auto-updates via onSnapshot
     } catch (e: any) {
       console.error(e);
       setError(e.message || "Failed to add/update allowlist entry.");
@@ -485,9 +477,7 @@ const AdminPage: React.FC = () => {
         )
       );
 
-      if (toDelete.length > 0) {
-        await loadAllowlist();
-      }
+      // onSnapshot will pick up deletions
     } catch (e: any) {
       console.error(e);
       setError(e.message || "Failed to clean up allowlist.");
@@ -499,44 +489,40 @@ const AdminPage: React.FC = () => {
   // --- Users handlers ---
 
   const handleUserTierChange = (id: string, tier: Tier) => {
-    setUserEntries((prev) =>
-      prev.map((u) => (u.id === id ? { ...u, tier } : u))
-    );
+    setUserEntries((prev) => {
+      const prevUser = prev.find((u) => u.id === id);
+      if (!prevUser) return prev;
+      const updatedUser: UserEntry = { ...prevUser, tier };
+      void persistUserEntry(updatedUser);
+      return prev.map((u) => (u.id === id ? updatedUser : u));
+    });
   };
 
-  const handleUserSave = async (user: UserEntry) => {
-    setSaving(true);
-    setError(null);
-    try {
-      const ref = doc(db, USERS_COLLECTION, user.id);
+  const handleUserSquadSelectChange = async (id: string, value: string) => {
+    if (value === "__ADD_NEW__") {
+      const input = window.prompt("Enter new squad name:");
+      if (!input) return;
+      const name = await addSquad(input);
+      if (!name) return;
 
-      const updateData: any = {
-        updatedAt: serverTimestamp(),
-      };
-
-      // Tier logic: no field = free
-      if (!user.tier || user.tier === "free") {
-        updateData.tier = deleteField();
-      } else {
-        updateData.tier = user.tier;
-      }
-
-      // Squad logic: optional; delete field if blank
-      const squad = (user.squadID ?? "").toString().trim();
-      if (squad) {
-        updateData.squadID = squad;
-        await addSquad(squad);
-      } else {
-        updateData.squadID = deleteField();
-      }
-
-      await updateDoc(ref, updateData);
-      setRecentUserSavedId(user.id);
-    } catch (e: any) {
-      console.error(e);
-      setError(e.message || "Failed to update user record.");
-    } finally {
-      setSaving(false);
+      setUserEntries((prev) => {
+        const prevUser = prev.find((u) => u.id === id);
+        if (!prevUser) return prev;
+        const updatedUser: UserEntry = { ...prevUser, squadID: name };
+        void persistUserEntry(updatedUser);
+        return prev.map((u) => (u.id === id ? updatedUser : u));
+      });
+    } else {
+      setUserEntries((prev) => {
+        const prevUser = prev.find((u) => u.id === id);
+        if (!prevUser) return prev;
+        const updatedUser: UserEntry = {
+          ...prevUser,
+          squadID: value || null,
+        };
+        void persistUserEntry(updatedUser);
+        return prev.map((u) => (u.id === id ? updatedUser : u));
+      });
     }
   };
 
@@ -558,9 +544,7 @@ const AdminPage: React.FC = () => {
     try {
       const ref = doc(db, USERS_COLLECTION, user.id);
       await deleteDoc(ref);
-
-      // Remove from local state
-      setUserEntries((prev) => prev.filter((u) => u.id !== user.id));
+      // onSnapshot removes from UI
     } catch (e: any) {
       console.error(e);
       setError(e.message || "Failed to delete user record.");
@@ -601,7 +585,6 @@ const AdminPage: React.FC = () => {
 
   // --- Derived filtered lists + stats ---
 
-  // Allowlist stats
   const totalAllowlist = allowlistEntries.length;
   const allowlistCounts = allowlistEntries.reduce(
     (acc, e) => {
@@ -611,7 +594,6 @@ const AdminPage: React.FC = () => {
     { free: 0, amateur: 0, pro: 0 } as Record<Tier, number>
   );
 
-  // Users stats
   const totalUsers = userEntries.length;
   const userCounts = userEntries.reduce(
     (acc, u) => {
@@ -670,506 +652,506 @@ const AdminPage: React.FC = () => {
     );
   }
 
-  // --- Authorized admin view with nav + scrollable body ---
+  // --- Authorized admin view ---
 
   return (
     <div style={page}>
+    <div
+      style={{
+        ...card,
+        display: "flex",
+        flexDirection: "column",
+        height: "90vh",
+      }}
+    >
+      {/* Header */}
       <div
         style={{
-          ...card,
-          display: "flex",
-          flexDirection: "column",
-          maxHeight: "90vh",
+          ...headerRow,
+          alignItems: "center",
         }}
       >
-        {/* Header */}
-        <div
-          style={{
-            ...headerRow,
-            alignItems: "center",
-          }}
-        >
-          {/* Left: logo + centered title block */}
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <img
-              src={appLogo}
-              alt="ATM 10MM App"
+        {/* Left: logo + centered title block */}
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <img
+            src={appLogo}
+            alt="ATM 10MM App"
+            style={{
+              width: 52,
+              height: 52,
+              borderRadius: 8,
+              objectFit: "contain",
+            }}
+          />
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "center",
+            }}
+          >
+            <h1 style={{ margin: 0, textAlign: "center" }}>
+              ATM 10MM App Admin Console
+            </h1>
+            <p
               style={{
-                width: 52,
-                height: 52,
-                borderRadius: 8,
-                objectFit: "contain",
-              }}
-            />
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                justifyContent: "center",
+                ...subtle,
+                margin: 0,
+                textAlign: "center",
               }}
             >
-              <h1 style={{ margin: 0, textAlign: "center" }}>
-                ATM 10MM App Admin Console
-              </h1>
+              Preload tiers &amp; squads via <strong>allowlist</strong> and
+              upgrade existing <strong>users</strong> after they register.
+            </p>
+          </div>
+        </div>
+
+        {/* Right: signed-in info */}
+        <div style={{ textAlign: "right" }}>
+          <div style={subtle}>
+            Signed in as <strong>{firebaseUser.email}</strong>
+          </div>
+          <button onClick={handleSignOut} style={buttonPrimary}>
+            Sign out
+          </button>
+        </div>
+      </div>
+
+      {/* Error message (if any) */}
+      {error && <p style={errorStyle}>{error}</p>}
+
+      {/* Top nav */}
+      <div style={navRow}>
+        <button
+          type="button"
+          onClick={() => setActiveTab("allowlist")}
+          style={{
+            ...navButton,
+            ...(activeTab === "allowlist" ? navButtonActive : navButtonIdle),
+          }}
+        >
+          Preload Access
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("users")}
+          style={{
+            ...navButton,
+            ...(activeTab === "users" ? navButtonActive : navButtonIdle),
+          }}
+        >
+          Existing Users
+        </button>
+      </div>
+
+      {/* Body area that fills remaining height */}
+      <div
+        style={{
+          flex: 1,
+          marginTop: 8,
+          paddingRight: 8,
+          overflow: "hidden",
+        }}
+      >
+        {activeTab === "allowlist" ? (
+          // --- PRELOAD / ALLOWLIST TAB ---
+          <section style={{ height: "100%" }}>
+            <div
+              style={{
+                ...sectionCard,
+                display: "flex",
+                flexDirection: "column",
+                height: "100%",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 8,
+                  marginBottom: 8,
+                }}
+              >
+                <h2 style={{ marginTop: 0, marginBottom: 0 }}>
+                  Preload Access (allowlist)
+                </h2>
+                <button
+                  type="button"
+                  onClick={handleDownloadAllowlistCsv}
+                  style={buttonSmall}
+                  disabled={allowlistEntries.length === 0}
+                >
+                  Download CSV
+                </button>
+              </div>
+
+              {/* --- Add area --- */}
+              <h3 style={sectionSubheading}>Add allowlist entry</h3>
               <p
                 style={{
                   ...subtle,
-                  margin: 0,
-                  textAlign: "center",
+                  opacity: 1,
                 }}
               >
-                Preload tiers &amp; squads via <strong>allowlist</strong> and
-                upgrade existing <strong>users</strong> after they register.
+                Add an allowlist entry. When someone registers with this email,
+                they’ll start with the selected tier. Optionally set their squad
+                now; if you leave it blank, you can assign their squad later on
+                the <strong>Existing Users</strong> tab.
               </p>
-            </div>
-          </div>
 
-          {/* Right: signed-in info */}
-          <div style={{ textAlign: "right" }}>
-            <div style={subtle}>
-              Signed in as <strong>{firebaseUser.email}</strong>
-            </div>
-            <button onClick={handleSignOut} style={buttonPrimary}>
-              Sign out
-            </button>
-          </div>
-        </div>
-
-        {/* Error message (if any) */}
-        {error && <p style={errorStyle}>{error}</p>}
-
-        {/* Top nav */}
-        <div style={navRow}>
-          <button
-            type="button"
-            onClick={() => setActiveTab("allowlist")}
-            style={{
-              ...navButton,
-              ...(activeTab === "allowlist" ? navButtonActive : navButtonIdle),
-            }}
-          >
-            Preload Access
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("users")}
-            style={{
-              ...navButton,
-              ...(activeTab === "users" ? navButtonActive : navButtonIdle),
-            }}
-          >
-            Existing Users
-          </button>
-        </div>
-
-        {/* Scrollable inner content */}
-        <div
-          style={{
-            flex: 1,
-            overflowY: "auto",
-            marginTop: 8,
-            paddingRight: 8,
-          }}
-        >
-          {activeTab === "allowlist" ? (
-            // --- PRELOAD / ALLOWLIST TAB ---
-            <section>
-              <div style={sectionCard}>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    gap: 8,
-                    marginBottom: 8,
-                  }}
+              {/* Add row */}
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  marginTop: 10,
+                  marginBottom: 18,
+                  flexWrap: "wrap",
+                }}
+              >
+                <input
+                  type="email"
+                  placeholder="user@example.com"
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                  style={searchInput}
+                />
+                <select
+                  value={newTier}
+                  onChange={(e) => setNewTier(e.target.value as Tier)}
+                  style={getTierSelectStyle(newTier)}
                 >
-                  <h2 style={{ marginTop: 0, marginBottom: 0 }}>
-                    Preload Access (allowlist)
-                  </h2>
-                  <button
-                    type="button"
-                    onClick={handleDownloadAllowlistCsv}
-                    style={buttonSmall}
-                    disabled={allowlistEntries.length === 0}
-                  >
-                    Download CSV
-                  </button>
-                </div>
-
-                {/* --- Add area --- */}
-                <h3 style={sectionSubheading}>Add allowlist entry</h3>
-                <p
-                  style={{
-                    ...subtle,
-                    opacity: 1, // brighter than default subtle
-                  }}
+                  <option value="free">Free</option>
+                  <option value="amateur">Amateur</option>
+                  <option value="pro">Pro</option>
+                </select>
+                <input
+                  type="text"
+                  placeholder="Squad ID (optional)"
+                  value={newSquadID}
+                  onChange={(e) => setNewSquadID(e.target.value)}
+                  style={select}
+                />
+                <button
+                  onClick={handleAddOrUpdateAllowlist}
+                  style={buttonPrimary}
+                  disabled={saving}
                 >
-                  Add an allowlist entry. When someone registers with this email,
-                  they’ll start with the selected tier. Optionally set their squad
-                  now; if you leave it blank, you can assign their squad later on
-                  the <strong>Existing Users</strong> tab.
-                </p>
-
-                {/* Add row */}
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    marginTop: 10,
-                    marginBottom: 18, // extra space before list area
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <input
-                    type="email"
-                    placeholder="user@example.com"
-                    value={newEmail}
-                    onChange={(e) => setNewEmail(e.target.value)}
-                    style={searchInput}
-                  />
-                  <select
-                    value={newTier}
-                    onChange={(e) => setNewTier(e.target.value as Tier)}
-                    style={getTierSelectStyle(newTier)}
-                  >
-                    <option value="free">Free</option>
-                    <option value="amateur">Amateur</option>
-                    <option value="pro">Pro</option>
-                  </select>
-                  <input
-                    type="text"
-                    placeholder="Squad ID (optional)"
-                    value={newSquadID}
-                    onChange={(e) => setNewSquadID(e.target.value)}
-                    style={select}
-                  />
-                  <button
-                    onClick={handleAddOrUpdateAllowlist}
-                    style={buttonPrimary}
-                    disabled={saving}
-                  >
-                    {saving ? "Saving…" : "Save"}
-                  </button>
-                </div>
-
-                {/* --- Simple list + cleanup --- */}
-                <h3 style={sectionSubheading}>Current allowlist entries</h3>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    gap: 8,
-                    marginBottom: 8,
-                    marginTop: 4,
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <span style={subtle}>
-                    Total: <strong>{totalAllowlist}</strong>{" "}
-                    {totalAllowlist > 0 && (
-                      <>
-                        · Free {allowlistCounts.free} · Amateur{" "}
-                        {allowlistCounts.amateur} · Pro {allowlistCounts.pro}
-                      </>
-                    )}
-                    {loadingSquads && " · Loading squads…"}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleCleanupAllowlist}
-                    style={buttonSmall}
-                    disabled={saving}
-                  >
-                    Clean up allowlist
-                  </button>
-                </div>
-
-                {loadingAllowlist ? (
-                  <p>Loading allowlist…</p>
-                ) : totalAllowlist === 0 ? (
-                  <p>No allowlist entries yet.</p>
-                ) : (
-                  <div style={{ overflowX: "auto", marginTop: 8 }}>
-                    <table style={table}>
-                      <thead>
-                        <tr>
-                          <th style={th}>Email</th>
-                          <th style={th}>Tier</th>
-                          <th style={th}>Squad</th>
-                          <th style={th}>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {allowlistEntries.map((e) => {
-                          const isRecentlySaved =
-                            recentAllowlistSavedId === e.id;
-                          const saveButtonStyle = isRecentlySaved
-                            ? buttonSavedSmall
-                            : buttonSuccessSmall;
-                          const saveButtonLabel = isRecentlySaved
-                            ? "Saved"
-                            : "Save";
-
-                          return (
-                            <tr key={e.id}>
-                              <td style={tdEmail}>{e.email}</td>
-                              <td style={tdTier}>
-                                <select
-                                  value={e.tier}
-                                  onChange={(ev) =>
-                                    handleAllowlistTierChange(
-                                      e.id,
-                                      ev.target.value as Tier
-                                    )
-                                  }
-                                  style={getTierSelectStyle(e.tier)}
-                                >
-                                  <option value="free">Free</option>
-                                  <option value="amateur">Amateur</option>
-                                  <option value="pro">Pro</option>
-                                </select>
-                              </td>
-                              <td style={tdSquad}>
-                                <select
-                                  value={e.squadID ?? ""}
-                                  onChange={(ev) =>
-                                    handleAllowlistSquadSelectChange(
-                                      e.id,
-                                      ev.target.value
-                                    )
-                                  }
-                                  style={select}
-                                >
-                                  <option value="">None</option>
-                                  {squadOptions.map((s) => (
-                                    <option key={s.id} value={s.name}>
-                                      {s.name}
-                                    </option>
-                                  ))}
-                                  <option value="__ADD_NEW__">
-                                    ➕ Add new…
-                                  </option>
-                                </select>
-                              </td>
-                              <td style={tdActions}>
-                                <div style={{ display: "flex", gap: 10 }}>
-                                  <button
-                                    onClick={() => handleAllowlistSave(e)}
-                                    style={saveButtonStyle}
-                                    disabled={saving}
-                                  >
-                                    {saveButtonLabel}
-                                  </button>
-                                  <button
-                                    onClick={() => handleAllowlistDelete(e)}
-                                    style={buttonDangerSmall}
-                                    disabled={saving}
-                                  >
-                                    Delete
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                  {saving ? "Saving…" : "Save"}
+                </button>
               </div>
-            </section>
-          ) : (
-            // --- USERS TAB ---
-            <section>
-              <div style={sectionCard}>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    gap: 8,
-                    marginBottom: 8,
-                  }}
+
+              {/* --- Simple list + cleanup --- */}
+              <h3 style={sectionSubheading}>Current allowlist entries</h3>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 8,
+                  marginBottom: 8,
+                  marginTop: 4,
+                  flexWrap: "wrap",
+                }}
+              >
+                <span style={subtle}>
+                  Total: <strong>{totalAllowlist}</strong>{" "}
+                  {totalAllowlist > 0 && (
+                    <>
+                      · Free {allowlistCounts.free} · Amateur{" "}
+                      {allowlistCounts.amateur} · Pro {allowlistCounts.pro}
+                    </>
+                  )}
+                  {loadingSquads && " · Loading squads…"}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleCleanupAllowlist}
+                  style={buttonSmall}
+                  disabled={saving}
                 >
-                  <h2 style={{ marginTop: 0, marginBottom: 0 }}>
-                    Existing Users (users collection)
-                  </h2>
-                  <button
-                    type="button"
-                    onClick={handleDownloadUsersCsv}
-                    style={buttonSmall}
-                    disabled={userEntries.length === 0}
-                  >
-                    Download CSV
-                  </button>
-                </div>
+                  Clean up allowlist
+                </button>
+              </div>
 
-                <p style={subtle}>
-                  These are users who have already signed up. If{" "}
-                  <strong>no tier field</strong> is set, they are treated as{" "}
-                  <strong>Free</strong>. Changing to Free here will remove the{" "}
-                  <code>tier</code> field again. Squad assignment for leaderboards
-                  lives on this screen in the <code>squadID</code> field.
-                </p>
-
-                {/* Search + stats */}
+              {loadingAllowlist ? (
+                <p>Loading allowlist…</p>
+              ) : totalAllowlist === 0 ? (
+                <p>No allowlist entries yet.</p>
+              ) : (
                 <div
                   style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: 8,
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    marginBottom: 8,
                     marginTop: 8,
+                    flex: 1,
+                    overflowY: "auto",
+                    overflowX: "auto",
+                    position: "relative",
+                    paddingBottom: 16,
                   }}
                 >
-                  <input
-                    type="text"
-                    placeholder="Search name or email…"
-                    value={searchUsers}
-                    onChange={(e) => setSearchUsers(e.target.value)}
-                    style={searchInput}
-                  />
-
-                  <div style={showingRow}>
-                    <span style={{ marginRight: 8 }}>
-                      Showing <strong>{filteredUsers.length}</strong> of{" "}
-                      <strong>{totalUsers}</strong> users
-                    </span>
-                    <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
-                      <TierChip
-                        label={`All`}
-                        active={tierFilterUsers === "all"}
-                        onClick={() => setTierFilterUsers("all")}
-                      />
-                      <TierChip
-                        label={`Free (${userCounts.free})`}
-                        active={tierFilterUsers === "free"}
-                        onClick={() => setTierFilterUsers("free")}
-                      />
-                      <TierChip
-                        label={`Amateur (${userCounts.amateur})`}
-                        active={tierFilterUsers === "amateur"}
-                        onClick={() => setTierFilterUsers("amateur")}
-                      />
-                      <TierChip
-                        label={`Pro (${userCounts.pro})`}
-                        active={tierFilterUsers === "pro"}
-                        onClick={() => setTierFilterUsers("pro")}
-                      />
-                    </span>
-                  </div>
-                </div>
-
-                {loadingUsers ? (
-                  <p>Loading users…</p>
-                ) : filteredUsers.length === 0 ? (
-                  <p>No users match this view.</p>
-                ) : (
-                  <div style={{ overflowX: "auto", marginTop: 8 }}>
-                    <table style={table}>
-                      <thead>
-                        <tr>
-                          <th style={th}>Display Name</th>
-                          <th style={th}>Email</th>
-                          <th style={th}>Tier</th>
-                          <th style={th}>Squad</th>
-                          <th style={th}>Actions</th>
+                  <table style={table}>
+                    <thead>
+                      <tr>
+                        <th style={th}>Email</th>
+                        <th style={th}>Tier</th>
+                        <th style={th}>Squad</th>
+                        <th style={th}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allowlistEntries.map((e) => (
+                        <tr key={e.id}>
+                          <td style={tdEmail}>{e.email}</td>
+                          <td style={tdTier}>
+                            <select
+                              value={e.tier}
+                              onChange={(ev) =>
+                                handleAllowlistTierChange(
+                                  e.id,
+                                  ev.target.value as Tier
+                                )
+                              }
+                              style={getTierSelectStyle(e.tier)}
+                            >
+                              <option value="free">Free</option>
+                              <option value="amateur">Amateur</option>
+                              <option value="pro">Pro</option>
+                            </select>
+                          </td>
+                          <td style={tdSquad}>
+                            <select
+                              value={e.squadID ?? ""}
+                              onChange={(ev) =>
+                                handleAllowlistSquadSelectChange(
+                                  e.id,
+                                  ev.target.value
+                                )
+                              }
+                              style={select}
+                            >
+                              <option value="">None</option>
+                              {squadOptions.map((s) => (
+                                <option key={s.id} value={s.name}>
+                                  {s.name}
+                                </option>
+                              ))}
+                              <option value="__ADD_NEW__">➕ Add new…</option>
+                            </select>
+                          </td>
+                          <td style={tdActions}>
+                            <div style={{ display: "flex", gap: 10 }}>
+                              <button
+                                onClick={() => handleAllowlistDelete(e)}
+                                style={buttonDangerSmall}
+                                disabled={saving}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {filteredUsers.map((u) => {
-                          const effectiveTier: Tier = (u.tier || "free") as Tier;
-                          const isFreeByMissingField = !u.tier;
-                          const isRecentlySaved = recentUserSavedId === u.id;
-                          const saveButtonStyle = isRecentlySaved
-                            ? buttonSavedSmall
-                            : buttonSuccessSmall;
-                          const saveButtonLabel = isRecentlySaved ? "Saved" : "Save";
-
-                          return (
-                            <tr key={u.id}>
-                              <td style={tdName}>{u.displayName || "—"}</td>
-                              <td style={tdEmail}>
-                                <div style={{ opacity: 0.8 }}>{u.email}</div>
-                              </td>
-                              <td style={tdTier}>
-                                <select
-                                  value={effectiveTier}
-                                  onChange={(ev) =>
-                                    handleUserTierChange(
-                                      u.id,
-                                      ev.target.value as Tier
-                                    )
-                                  }
-                                  style={getTierSelectStyle(effectiveTier)}
-                                >
-                                  <option value="free">
-                                    Free
-                                    {isFreeByMissingField
-                                      ? " (no tier set)"
-                                      : ""}
-                                  </option>
-                                  <option value="amateur">Amateur</option>
-                                  <option value="pro">Pro</option>
-                                </select>
-                              </td>
-                              <td style={tdSquad}>
-                                <select
-                                  value={u.squadID ?? ""}
-                                  onChange={(ev) =>
-                                    handleUserSquadSelectChange(
-                                      u.id,
-                                      ev.target.value
-                                    )
-                                  }
-                                  style={select}
-                                >
-                                  <option value="">None</option>
-                                  {squadOptions.map((s) => (
-                                    <option key={s.id} value={s.name}>
-                                      {s.name}
-                                    </option>
-                                  ))}
-                                  <option value="__ADD_NEW__">
-                                    ➕ Add new…
-                                  </option>
-                                </select>
-                              </td>
-                              <td style={tdActions}>
-                                <div style={{ display: "flex", gap: 10 }}>
-                                  <button
-                                    onClick={() => handleUserSave(u)}
-                                    style={saveButtonStyle}
-                                    disabled={saving}
-                                  >
-                                    {saveButtonLabel}
-                                  </button>
-                                  <button
-                                    onClick={() => handleUserDelete(u)}
-                                    style={buttonDangerSmall}
-                                    disabled={saving}
-                                  >
-                                    Delete
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </section>
+        ) : (
+          // --- USERS TAB ---
+          <section style={{ height: "100%" }}>
+            <div
+              style={{
+                ...sectionCard,
+                display: "flex",
+                flexDirection: "column",
+                height: "100%",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 8,
+                  marginBottom: 8,
+                }}
+              >
+                <h2 style={{ marginTop: 0, marginBottom: 0 }}>
+                  Existing Users (users collection)
+                </h2>
+                <button
+                  type="button"
+                  onClick={handleDownloadUsersCsv}
+                  style={buttonSmall}
+                  disabled={userEntries.length === 0}
+                >
+                  Download CSV
+                </button>
               </div>
-            </section>
-          )}
-        </div>
+
+              <p style={subtle}>
+                These are users who have already signed up. If{" "}
+                <strong>no tier field</strong> is set, they are treated as{" "}
+                <strong>Free</strong>. Changing to Free here will remove the{" "}
+                <code>tier</code> field again. Squad assignment for leaderboards
+                lives on this screen in the <code>squadID</code> field.
+              </p>
+
+              {/* Search + stats */}
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 8,
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  marginBottom: 8,
+                  marginTop: 8,
+                }}
+              >
+                <input
+                  type="text"
+                  placeholder="Search name or email…"
+                  value={searchUsers}
+                  onChange={(e) => setSearchUsers(e.target.value)}
+                  style={searchInput}
+                />
+
+                <div style={showingRow}>
+                  <span style={{ marginRight: 8 }}>
+                    Showing <strong>{filteredUsers.length}</strong> of{" "}
+                    <strong>{totalUsers}</strong> users
+                  </span>
+                  <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
+                    <TierChip
+                      label={`All`}
+                      active={tierFilterUsers === "all"}
+                      onClick={() => setTierFilterUsers("all")}
+                    />
+                    <TierChip
+                      label={`Free (${userCounts.free})`}
+                      active={tierFilterUsers === "free"}
+                      onClick={() => setTierFilterUsers("free")}
+                    />
+                    <TierChip
+                      label={`Amateur (${userCounts.amateur})`}
+                      active={tierFilterUsers === "amateur"}
+                      onClick={() => setTierFilterUsers("amateur")}
+                    />
+                    <TierChip
+                      label={`Pro (${userCounts.pro})`}
+                      active={tierFilterUsers === "pro"}
+                      onClick={() => setTierFilterUsers("pro")}
+                    />
+                  </span>
+                </div>
+              </div>
+
+              {loadingUsers ? (
+                <p>Loading users…</p>
+              ) : filteredUsers.length === 0 ? (
+                <p>No users match this view.</p>
+              ) : (
+                <div
+                  style={{
+                    marginTop: 8,
+                    flex: 1,
+                    overflowY: "auto",
+                    overflowX: "auto",
+                    position: "relative",
+                    paddingBottom: 16,
+                  }}
+                >
+                  <table style={table}>
+                    <thead>
+                      <tr>
+                        <th style={th}>Display Name</th>
+                        <th style={th}>Email</th>
+                        <th style={th}>Tier</th>
+                        <th style={th}>Squad</th>
+                        <th style={th}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredUsers.map((u) => {
+                        const effectiveTier: Tier = (u.tier || "free") as Tier;
+                        const isFreeByMissingField = !u.tier;
+
+                        return (
+                          <tr key={u.id}>
+                            <td style={tdName}>{u.displayName || "—"}</td>
+                            <td style={tdEmail}>
+                              <div style={{ opacity: 0.8 }}>{u.email}</div>
+                            </td>
+                            <td style={tdTier}>
+                              <select
+                                value={effectiveTier}
+                                onChange={(ev) =>
+                                  handleUserTierChange(
+                                    u.id,
+                                    ev.target.value as Tier
+                                  )
+                                }
+                                style={getTierSelectStyle(effectiveTier)}
+                              >
+                                <option value="free">
+                                  Free
+                                  {isFreeByMissingField
+                                    ? " (no tier set)"
+                                    : ""}
+                                </option>
+                                <option value="amateur">Amateur</option>
+                                <option value="pro">Pro</option>
+                              </select>
+                            </td>
+                            <td style={tdSquad}>
+                              <select
+                                value={u.squadID ?? ""}
+                                onChange={(ev) =>
+                                  handleUserSquadSelectChange(
+                                    u.id,
+                                    ev.target.value
+                                  )
+                                }
+                                style={select}
+                              >
+                                <option value="">None</option>
+                                {squadOptions.map((s) => (
+                                  <option key={s.id} value={s.name}>
+                                    {s.name}
+                                  </option>
+                                ))}
+                                <option value="__ADD_NEW__">
+                                  ➕ Add new…
+                                </option>
+                              </select>
+                            </td>
+                            <td style={tdActions}>
+                              <div style={{ display: "flex", gap: 10 }}>
+                                <button
+                                  onClick={() => handleUserDelete(u)}
+                                  style={buttonDangerSmall}
+                                  disabled={saving}
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
       </div>
     </div>
+  </div>
   );
 };
 
@@ -1222,7 +1204,6 @@ const getTierSelectStyle = (tier: Tier): React.CSSProperties => {
       border: "1px solid rgba(59,130,246,0.9)",
     };
   }
-  // pro
   return {
     ...base,
     background: "rgba(34,197,94,0.18)",
@@ -1293,20 +1274,6 @@ const buttonSmall: React.CSSProperties = {
   fontSize: 13,
 };
 
-const buttonSuccessSmall: React.CSSProperties = {
-  ...buttonSmall,
-  border: "1px solid #22c55e",
-  color: "#bbf7d0",
-  background: "rgba(34, 197, 94, 0.12)",
-};
-
-const buttonSavedSmall: React.CSSProperties = {
-  ...buttonSmall,
-  border: "1px solid #9ca3af",
-  color: "#e5e7eb",
-  background: "rgba(148,163,184,0.2)",
-};
-
 const buttonDangerSmall: React.CSSProperties = {
   ...buttonSmall,
   background: "transparent",
@@ -1348,6 +1315,10 @@ const th: React.CSSProperties = {
   fontWeight: 600,
   fontSize: 13,
   whiteSpace: "nowrap",
+  position: "sticky",
+  top: 0,
+  background: "#020617",
+  zIndex: 1,
 };
 
 const tdBase: React.CSSProperties = {
@@ -1380,7 +1351,7 @@ const tdSquad: React.CSSProperties = {
 
 const tdActions: React.CSSProperties = {
   ...tdBase,
-  minWidth: 150,
+  minWidth: 100,
 };
 
 const subtle: React.CSSProperties = {
