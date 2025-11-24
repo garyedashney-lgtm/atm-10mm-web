@@ -127,7 +127,6 @@ const AdminPage: React.FC = () => {
     return () => unsub();
   }, []);
 
-
   // --- REALTIME LISTENERS (no flicker, live data) ---
 
   useEffect(() => {
@@ -656,462 +655,270 @@ const AdminPage: React.FC = () => {
 
   return (
     <div style={page}>
-    <div
-      style={{
-        ...card,
-        display: "flex",
-        flexDirection: "column",
-        height: "90vh",
-      }}
-    >
-      {/* Header */}
       <div
         style={{
-          ...headerRow,
-          alignItems: "center",
+          ...card,
+          display: "flex",
+          flexDirection: "column",
+          height: "auto",
         }}
       >
-        {/* Left: logo + centered title block */}
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <img
-            src={appLogo}
-            alt="ATM 10MM App"
-            style={{
-              width: 52,
-              height: 52,
-              borderRadius: 8,
-              objectFit: "contain",
-            }}
-          />
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              justifyContent: "center",
-            }}
-          >
-            <h1 style={{ margin: 0, textAlign: "center" }}>
-              ATM 10MM App Admin Console
-            </h1>
-            <p
+        {/* Header */}
+        <div
+          style={{
+            ...headerRow,
+            alignItems: "center",
+          }}
+        >
+          {/* Left: logo + centered title block */}
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <img
+              src={appLogo}
+              alt="ATM 10MM App"
               style={{
-                ...subtle,
-                margin: 0,
-                textAlign: "center",
+                width: 52,
+                height: 52,
+                borderRadius: 8,
+                objectFit: "contain",
               }}
-            >
-              Preload tiers &amp; squads via <strong>allowlist</strong> and
-              upgrade existing <strong>users</strong> after they register.
-            </p>
-          </div>
-        </div>
-
-        {/* Right: signed-in info */}
-        <div style={{ textAlign: "right" }}>
-          <div style={subtle}>
-            Signed in as <strong>{firebaseUser.email}</strong>
-          </div>
-          <button onClick={handleSignOut} style={buttonPrimary}>
-            Sign out
-          </button>
-        </div>
-      </div>
-
-      {/* Error message (if any) */}
-      {error && <p style={errorStyle}>{error}</p>}
-
-      {/* Top nav */}
-      <div style={navRow}>
-        <button
-          type="button"
-          onClick={() => setActiveTab("allowlist")}
-          style={{
-            ...navButton,
-            ...(activeTab === "allowlist" ? navButtonActive : navButtonIdle),
-          }}
-        >
-          Preload Access
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab("users")}
-          style={{
-            ...navButton,
-            ...(activeTab === "users" ? navButtonActive : navButtonIdle),
-          }}
-        >
-          Existing Users
-        </button>
-      </div>
-
-      {/* Body area that fills remaining height */}
-      <div
-        style={{
-          flex: 1,
-          marginTop: 8,
-          paddingRight: 8,
-          overflow: "hidden",
-        }}
-      >
-        {activeTab === "allowlist" ? (
-          // --- PRELOAD / ALLOWLIST TAB ---
-          <section style={{ height: "100%" }}>
+            />
             <div
               style={{
-                ...sectionCard,
                 display: "flex",
                 flexDirection: "column",
-                height: "100%",
+                justifyContent: "center",
               }}
             >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 8,
-                  marginBottom: 8,
-                }}
-              >
-                <h2 style={{ marginTop: 0, marginBottom: 0 }}>
-                  Preload Access (allowlist)
-                </h2>
-                <button
-                  type="button"
-                  onClick={handleDownloadAllowlistCsv}
-                  style={buttonSmall}
-                  disabled={allowlistEntries.length === 0}
-                >
-                  Download CSV
-                </button>
-              </div>
-
-              {/* --- Add area --- */}
-              <h3 style={sectionSubheading}>Add allowlist entry</h3>
+              <h1 style={{ margin: 0, textAlign: "center" }}>
+                ATM 10MM App Admin Console
+              </h1>
               <p
                 style={{
                   ...subtle,
-                  opacity: 1,
+                  margin: 0,
+                  textAlign: "center",
                 }}
               >
-                Add an allowlist entry. When someone registers with this email,
-                they’ll start with the selected tier. Optionally set their squad
-                now; if you leave it blank, you can assign their squad later on
-                the <strong>Existing Users</strong> tab.
+                Preload tiers &amp; squads via <strong>allowlist</strong> and
+                upgrade existing <strong>users</strong> after they register.
               </p>
-
-              {/* Add row */}
-              <div
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  marginTop: 10,
-                  marginBottom: 18,
-                  flexWrap: "wrap",
-                }}
-              >
-                <input
-                  type="email"
-                  placeholder="user@example.com"
-                  value={newEmail}
-                  onChange={(e) => setNewEmail(e.target.value)}
-                  style={searchInput}
-                />
-                <select
-                  value={newTier}
-                  onChange={(e) => setNewTier(e.target.value as Tier)}
-                  style={getTierSelectStyle(newTier)}
-                >
-                  <option value="free">Free</option>
-                  <option value="amateur">Amateur</option>
-                  <option value="pro">Pro</option>
-                </select>
-                <input
-                  type="text"
-                  placeholder="Squad ID (optional)"
-                  value={newSquadID}
-                  onChange={(e) => setNewSquadID(e.target.value)}
-                  style={select}
-                />
-                <button
-                  onClick={handleAddOrUpdateAllowlist}
-                  style={buttonPrimary}
-                  disabled={saving}
-                >
-                  {saving ? "Saving…" : "Save"}
-                </button>
-              </div>
-
-              {/* --- Simple list + cleanup --- */}
-              <h3 style={sectionSubheading}>Current allowlist entries</h3>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 8,
-                  marginBottom: 8,
-                  marginTop: 4,
-                  flexWrap: "wrap",
-                }}
-              >
-                <span style={subtle}>
-                  Total: <strong>{totalAllowlist}</strong>{" "}
-                  {totalAllowlist > 0 && (
-                    <>
-                      · Free {allowlistCounts.free} · Amateur{" "}
-                      {allowlistCounts.amateur} · Pro {allowlistCounts.pro}
-                    </>
-                  )}
-                  {loadingSquads && " · Loading squads…"}
-                </span>
-                <button
-                  type="button"
-                  onClick={handleCleanupAllowlist}
-                  style={buttonSmall}
-                  disabled={saving}
-                >
-                  Clean up allowlist
-                </button>
-              </div>
-
-              {loadingAllowlist ? (
-                <p>Loading allowlist…</p>
-              ) : totalAllowlist === 0 ? (
-                <p>No allowlist entries yet.</p>
-              ) : (
-                <div
-                  style={{
-                    marginTop: 8,
-                    flex: 1,
-                    overflowY: "auto",
-                    overflowX: "auto",
-                    position: "relative",
-                    paddingBottom: 16,
-                  }}
-                >
-                  <table style={table}>
-                    <thead>
-                      <tr>
-                        <th style={th}>Email</th>
-                        <th style={th}>Tier</th>
-                        <th style={th}>Squad</th>
-                        <th style={th}>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {allowlistEntries.map((e) => (
-                        <tr key={e.id}>
-                          <td style={tdEmail}>{e.email}</td>
-                          <td style={tdTier}>
-                            <select
-                              value={e.tier}
-                              onChange={(ev) =>
-                                handleAllowlistTierChange(
-                                  e.id,
-                                  ev.target.value as Tier
-                                )
-                              }
-                              style={getTierSelectStyle(e.tier)}
-                            >
-                              <option value="free">Free</option>
-                              <option value="amateur">Amateur</option>
-                              <option value="pro">Pro</option>
-                            </select>
-                          </td>
-                          <td style={tdSquad}>
-                            <select
-                              value={e.squadID ?? ""}
-                              onChange={(ev) =>
-                                handleAllowlistSquadSelectChange(
-                                  e.id,
-                                  ev.target.value
-                                )
-                              }
-                              style={select}
-                            >
-                              <option value="">None</option>
-                              {squadOptions.map((s) => (
-                                <option key={s.id} value={s.name}>
-                                  {s.name}
-                                </option>
-                              ))}
-                              <option value="__ADD_NEW__">➕ Add new…</option>
-                            </select>
-                          </td>
-                          <td style={tdActions}>
-                            <div style={{ display: "flex", gap: 10 }}>
-                              <button
-                                onClick={() => handleAllowlistDelete(e)}
-                                style={buttonDangerSmall}
-                                disabled={saving}
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
             </div>
-          </section>
-        ) : (
-          // --- USERS TAB ---
-          <section style={{ height: "100%" }}>
-            <div
-              style={{
-                ...sectionCard,
-                display: "flex",
-                flexDirection: "column",
-                height: "100%",
-              }}
-            >
+          </div>
+
+          {/* Right: signed-in info */}
+          <div style={{ textAlign: "right" }}>
+            <div style={subtle}>
+              Signed in as <strong>{firebaseUser.email}</strong>
+            </div>
+            <button onClick={handleSignOut} style={buttonPrimary}>
+              Sign out
+            </button>
+          </div>
+        </div>
+
+        {/* Error message (if any) */}
+        {error && <p style={errorStyle}>{error}</p>}
+
+        {/* Top nav */}
+        <div style={navRow}>
+          <button
+            type="button"
+            onClick={() => setActiveTab("allowlist")}
+            style={{
+              ...navButton,
+              ...(activeTab === "allowlist" ? navButtonActive : navButtonIdle),
+            }}
+          >
+            Preload Access
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("users")}
+            style={{
+              ...navButton,
+              ...(activeTab === "users" ? navButtonActive : navButtonIdle),
+            }}
+          >
+            Existing Users
+          </button>
+        </div>
+
+        {/* Body area */}
+        <div
+          style={{
+            marginTop: 8,
+            paddingRight: 8,
+          }}
+        >
+          {activeTab === "allowlist" ? (
+            // --- PRELOAD / ALLOWLIST TAB ---
+            <section>
               <div
                 style={{
+                  ...sectionCard,
                   display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 8,
-                  marginBottom: 8,
+                  flexDirection: "column",
                 }}
               >
-                <h2 style={{ marginTop: 0, marginBottom: 0 }}>
-                  Existing Users (users collection)
-                </h2>
-                <button
-                  type="button"
-                  onClick={handleDownloadUsersCsv}
-                  style={buttonSmall}
-                  disabled={userEntries.length === 0}
-                >
-                  Download CSV
-                </button>
-              </div>
-
-              <p style={subtle}>
-                These are users who have already signed up. If{" "}
-                <strong>no tier field</strong> is set, they are treated as{" "}
-                <strong>Free</strong>. Changing to Free here will remove the{" "}
-                <code>tier</code> field again. Squad assignment for leaderboards
-                lives on this screen in the <code>squadID</code> field.
-              </p>
-
-              {/* Search + stats */}
-              <div
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: 8,
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  marginBottom: 8,
-                  marginTop: 8,
-                }}
-              >
-                <input
-                  type="text"
-                  placeholder="Search name or email…"
-                  value={searchUsers}
-                  onChange={(e) => setSearchUsers(e.target.value)}
-                  style={searchInput}
-                />
-
-                <div style={showingRow}>
-                  <span style={{ marginRight: 8 }}>
-                    Showing <strong>{filteredUsers.length}</strong> of{" "}
-                    <strong>{totalUsers}</strong> users
-                  </span>
-                  <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
-                    <TierChip
-                      label={`All`}
-                      active={tierFilterUsers === "all"}
-                      onClick={() => setTierFilterUsers("all")}
-                    />
-                    <TierChip
-                      label={`Free (${userCounts.free})`}
-                      active={tierFilterUsers === "free"}
-                      onClick={() => setTierFilterUsers("free")}
-                    />
-                    <TierChip
-                      label={`Amateur (${userCounts.amateur})`}
-                      active={tierFilterUsers === "amateur"}
-                      onClick={() => setTierFilterUsers("amateur")}
-                    />
-                    <TierChip
-                      label={`Pro (${userCounts.pro})`}
-                      active={tierFilterUsers === "pro"}
-                      onClick={() => setTierFilterUsers("pro")}
-                    />
-                  </span>
-                </div>
-              </div>
-
-              {loadingUsers ? (
-                <p>Loading users…</p>
-              ) : filteredUsers.length === 0 ? (
-                <p>No users match this view.</p>
-              ) : (
                 <div
                   style={{
-                    marginTop: 8,
-                    flex: 1,
-                    overflowY: "auto",
-                    overflowX: "auto",
-                    position: "relative",
-                    paddingBottom: 16,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 8,
+                    marginBottom: 8,
                   }}
                 >
-                  <table style={table}>
-                    <thead>
-                      <tr>
-                        <th style={th}>Display Name</th>
-                        <th style={th}>Email</th>
-                        <th style={th}>Tier</th>
-                        <th style={th}>Squad</th>
-                        <th style={th}>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredUsers.map((u) => {
-                        const effectiveTier: Tier = (u.tier || "free") as Tier;
-                        const isFreeByMissingField = !u.tier;
+                  <h2 style={{ marginTop: 0, marginBottom: 0 }}>
+                    Preload Access (allowlist)
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={handleDownloadAllowlistCsv}
+                    style={buttonSmall}
+                    disabled={allowlistEntries.length === 0}
+                  >
+                    Download CSV
+                  </button>
+                </div>
 
-                        return (
-                          <tr key={u.id}>
-                            <td style={tdName}>{u.displayName || "—"}</td>
-                            <td style={tdEmail}>
-                              <div style={{ opacity: 0.8 }}>{u.email}</div>
-                            </td>
+                {/* --- Add area --- */}
+                <h3 style={sectionSubheading}>Add allowlist entry</h3>
+                <p
+                  style={{
+                    ...subtle,
+                    opacity: 1,
+                  }}
+                >
+                  Add an allowlist entry. When someone registers with this email,
+                  they’ll start with the selected tier. Optionally set their squad
+                  now; if you leave it blank, you can assign their squad later on
+                  the <strong>Existing Users</strong> tab.
+                </p>
+
+                {/* Add row */}
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    marginTop: 10,
+                    marginBottom: 18,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <input
+                    type="email"
+                    placeholder="user@example.com"
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                    style={searchInput}
+                  />
+                  <select
+                    value={newTier}
+                    onChange={(e) => setNewTier(e.target.value as Tier)}
+                    style={getTierSelectStyle(newTier)}
+                  >
+                    <option value="free">Free</option>
+                    <option value="amateur">Amateur</option>
+                    <option value="pro">Pro</option>
+                  </select>
+                  <input
+                    type="text"
+                    placeholder="Squad ID (optional)"
+                    value={newSquadID}
+                    onChange={(e) => setNewSquadID(e.target.value)}
+                    style={select}
+                  />
+                  <button
+                    onClick={handleAddOrUpdateAllowlist}
+                    style={buttonPrimary}
+                    disabled={saving}
+                  >
+                    {saving ? "Saving…" : "Save"}
+                  </button>
+                </div>
+
+                {/* --- Simple list + cleanup --- */}
+                <h3 style={sectionSubheading}>Current allowlist entries</h3>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 8,
+                    marginBottom: 8,
+                    marginTop: 4,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span style={subtle}>
+                    Total: <strong>{totalAllowlist}</strong>{" "}
+                    {totalAllowlist > 0 && (
+                      <>
+                        · Free {allowlistCounts.free} · Amateur{" "}
+                        {allowlistCounts.amateur} · Pro {allowlistCounts.pro}
+                      </>
+                    )}
+                    {loadingSquads && " · Loading squads…"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleCleanupAllowlist}
+                    style={buttonSmall}
+                    disabled={saving}
+                  >
+                    Clean up allowlist
+                  </button>
+                </div>
+
+                {loadingAllowlist ? (
+                  <p>Loading allowlist…</p>
+                ) : totalAllowlist === 0 ? (
+                  <p>No allowlist entries yet.</p>
+                ) : (
+                  <div
+                    style={{
+                      marginTop: 8,
+                      overflowX: "auto",
+                      position: "relative",
+                      paddingBottom: 16,
+                    }}
+                  >
+                    <table style={table}>
+                      <thead>
+                        <tr>
+                          <th style={th}>Email</th>
+                          <th style={th}>Tier</th>
+                          <th style={th}>Squad</th>
+                          <th style={th}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {allowlistEntries.map((e) => (
+                          <tr key={e.id}>
+                            <td style={tdEmail}>{e.email}</td>
                             <td style={tdTier}>
                               <select
-                                value={effectiveTier}
+                                value={e.tier}
                                 onChange={(ev) =>
-                                  handleUserTierChange(
-                                    u.id,
+                                  handleAllowlistTierChange(
+                                    e.id,
                                     ev.target.value as Tier
                                   )
                                 }
-                                style={getTierSelectStyle(effectiveTier)}
+                                style={getTierSelectStyle(e.tier)}
                               >
-                                <option value="free">
-                                  Free
-                                  {isFreeByMissingField
-                                    ? " (no tier set)"
-                                    : ""}
-                                </option>
+                                <option value="free">Free</option>
                                 <option value="amateur">Amateur</option>
                                 <option value="pro">Pro</option>
                               </select>
                             </td>
                             <td style={tdSquad}>
                               <select
-                                value={u.squadID ?? ""}
+                                value={e.squadID ?? ""}
                                 onChange={(ev) =>
-                                  handleUserSquadSelectChange(
-                                    u.id,
+                                  handleAllowlistSquadSelectChange(
+                                    e.id,
                                     ev.target.value
                                   )
                                 }
@@ -1123,15 +930,13 @@ const AdminPage: React.FC = () => {
                                     {s.name}
                                   </option>
                                 ))}
-                                <option value="__ADD_NEW__">
-                                  ➕ Add new…
-                                </option>
+                                <option value="__ADD_NEW__">➕ Add new…</option>
                               </select>
                             </td>
                             <td style={tdActions}>
                               <div style={{ display: "flex", gap: 10 }}>
                                 <button
-                                  onClick={() => handleUserDelete(u)}
+                                  onClick={() => handleAllowlistDelete(e)}
                                   style={buttonDangerSmall}
                                   disabled={saving}
                                 >
@@ -1140,18 +945,210 @@ const AdminPage: React.FC = () => {
                               </div>
                             </td>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </section>
+          ) : (
+            // --- USERS TAB ---
+            <section>
+              <div
+                style={{
+                  ...sectionCard,
+                  display: "flex",
+                  flexDirection: "column",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 8,
+                    marginBottom: 8,
+                  }}
+                >
+                  <h2 style={{ marginTop: 0, marginBottom: 0 }}>
+                    Existing Users (users collection)
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={handleDownloadUsersCsv}
+                    style={buttonSmall}
+                    disabled={userEntries.length === 0}
+                  >
+                    Download CSV
+                  </button>
                 </div>
-              )}
-            </div>
-          </section>
-        )}
+
+                <p style={subtle}>
+                  These are users who have already signed up. If{" "}
+                  <strong>no tier field</strong> is set, they are treated as{" "}
+                  <strong>Free</strong>. Changing to Free here will remove the{" "}
+                  <code>tier</code> field again. Squad assignment for leaderboards
+                  lives on this screen in the <code>squadID</code> field.
+                </p>
+
+                {/* Search + stats */}
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 8,
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginBottom: 8,
+                    marginTop: 8,
+                  }}
+                >
+                  <input
+                    type="text"
+                    placeholder="Search name or email…"
+                    value={searchUsers}
+                    onChange={(e) => setSearchUsers(e.target.value)}
+                    style={searchInput}
+                  />
+
+                  <div style={showingRow}>
+                    <span style={{ marginRight: 8 }}>
+                      Showing <strong>{filteredUsers.length}</strong> of{" "}
+                      <strong>{totalUsers}</strong> users
+                    </span>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        gap: 6,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <TierChip
+                        label={`All`}
+                        active={tierFilterUsers === "all"}
+                        onClick={() => setTierFilterUsers("all")}
+                      />
+                      <TierChip
+                        label={`Free (${userCounts.free})`}
+                        active={tierFilterUsers === "free"}
+                        onClick={() => setTierFilterUsers("free")}
+                      />
+                      <TierChip
+                        label={`Amateur (${userCounts.amateur})`}
+                        active={tierFilterUsers === "amateur"}
+                        onClick={() => setTierFilterUsers("amateur")}
+                      />
+                      <TierChip
+                        label={`Pro (${userCounts.pro})`}
+                        active={tierFilterUsers === "pro"}
+                        onClick={() => setTierFilterUsers("pro")}
+                      />
+                    </span>
+                  </div>
+                </div>
+
+                {loadingUsers ? (
+                  <p>Loading users…</p>
+                ) : filteredUsers.length === 0 ? (
+                  <p>No users match this view.</p>
+                ) : (
+                  <div
+                    style={{
+                      marginTop: 8,
+                      overflowX: "auto",
+                      position: "relative",
+                      paddingBottom: 16,
+                    }}
+                  >
+                    <table style={table}>
+                      <thead>
+                        <tr>
+                          <th style={th}>Display Name</th>
+                          <th style={th}>Email</th>
+                          <th style={th}>Tier</th>
+                          <th style={th}>Squad</th>
+                          <th style={th}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredUsers.map((u) => {
+                          const effectiveTier: Tier = (u.tier || "free") as Tier;
+                          const isFreeByMissingField = !u.tier;
+
+                          return (
+                            <tr key={u.id}>
+                              <td style={tdName}>{u.displayName || "—"}</td>
+                              <td style={tdEmail}>
+                                <div style={{ opacity: 0.8 }}>{u.email}</div>
+                              </td>
+                              <td style={tdTier}>
+                                <select
+                                  value={effectiveTier}
+                                  onChange={(ev) =>
+                                    handleUserTierChange(
+                                      u.id,
+                                      ev.target.value as Tier
+                                    )
+                                  }
+                                  style={getTierSelectStyle(effectiveTier)}
+                                >
+                                  <option value="free">
+                                    Free
+                                    {isFreeByMissingField
+                                      ? " (no tier set)"
+                                      : ""}
+                                  </option>
+                                  <option value="amateur">Amateur</option>
+                                  <option value="pro">Pro</option>
+                                </select>
+                              </td>
+                              <td style={tdSquad}>
+                                <select
+                                  value={u.squadID ?? ""}
+                                  onChange={(ev) =>
+                                    handleUserSquadSelectChange(
+                                      u.id,
+                                      ev.target.value
+                                    )
+                                  }
+                                  style={select}
+                                >
+                                  <option value="">None</option>
+                                  {squadOptions.map((s) => (
+                                    <option key={s.id} value={s.name}>
+                                      {s.name}
+                                    </option>
+                                  ))}
+                                  <option value="__ADD_NEW__">
+                                    ➕ Add new…
+                                  </option>
+                                </select>
+                              </td>
+                              <td style={tdActions}>
+                                <div style={{ display: "flex", gap: 10 }}>
+                                  <button
+                                    onClick={() => handleUserDelete(u)}
+                                    style={buttonDangerSmall}
+                                    disabled={saving}
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+        </div>
       </div>
     </div>
-  </div>
   );
 };
 
@@ -1192,7 +1189,6 @@ const getTierSelectStyle = (tier: Tier): React.CSSProperties => {
     return {
       ...base,
       background: "rgba(148,163,184,0.15)",
-      color: "#e5e7eb",
       border: "1px solid rgba(148,163,184,0.8)",
     };
   }
@@ -1200,14 +1196,12 @@ const getTierSelectStyle = (tier: Tier): React.CSSProperties => {
     return {
       ...base,
       background: "rgba(59,130,246,0.18)",
-      color: "#dbeafe",
       border: "1px solid rgba(59,130,246,0.9)",
     };
   }
   return {
     ...base,
     background: "rgba(34,197,94,0.18)",
-    color: "#bbf7d0",
     border: "1px solid rgba(34,197,94,0.9)",
   };
 };
@@ -1216,9 +1210,6 @@ const getTierSelectStyle = (tier: Tier): React.CSSProperties => {
 const page: React.CSSProperties = {
   minHeight: "100vh",
   background: "#0f172a",
-  display: "flex",
-  alignItems: "flex-start",
-  justifyContent: "center",
   padding: 16,
 };
 
@@ -1230,6 +1221,7 @@ const card: React.CSSProperties = {
   maxWidth: 1100,
   width: "100%",
   boxShadow: "0 20px 40px rgba(0,0,0,0.4)",
+  margin: "0 auto 24px",
 };
 
 const sectionCard: React.CSSProperties = {
