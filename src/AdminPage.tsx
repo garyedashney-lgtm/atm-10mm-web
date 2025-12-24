@@ -1,5 +1,5 @@
 // src/AdminPage.tsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import appLogo from "./assets/app_logo.png";
 import type { User as FirebaseUser } from "firebase/auth";
 import {
@@ -17,6 +17,7 @@ import {
   deleteField,
   deleteDoc,
   onSnapshot,
+  Timestamp,
 } from "firebase/firestore";
 import { auth, db } from "./firebase";
 
@@ -75,6 +76,8 @@ interface UserEntry {
   id: string; // doc id = UID
   email: string;
   displayName: string;
+  createdAt?: Timestamp | null;
+  source?: string | null;
   tier?: Tier | null; // missing = free
   squadID?: string | null;
 }
@@ -85,6 +88,9 @@ interface SquadOption {
 }
 
 const googleProvider = new GoogleAuthProvider();
+
+type UserSortKey = "displayName" | "email" | "createdAt" | "source";
+type SortDir = "asc" | "desc";
 
 const AdminPage: React.FC = () => {
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
@@ -106,6 +112,14 @@ const AdminPage: React.FC = () => {
   const [searchUsers, setSearchUsers] = useState("");
   const [tierFilterUsers, setTierFilterUsers] = useState<Tier | "all">("all");
 
+  // Users sorting (clickable column headers)
+  const [userSort, setUserSort] = useState<{ key: UserSortKey; dir: SortDir }>(
+    {
+      key: "email",
+      dir: "asc",
+    }
+  );
+
   // --- squads state ---
   const [squadOptions, setSquadOptions] = useState<SquadOption[]>([]);
   const [loadingSquads, setLoadingSquads] = useState(false);
@@ -113,6 +127,37 @@ const AdminPage: React.FC = () => {
   // shared
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Prevent repeated auto-clean deletes for same email
+  const autoCleanRanFor = useRef<Set<string>>(new Set());
+
+  const toggleUserSort = (key: UserSortKey) => {
+    setUserSort((prev) => {
+      if (prev.key === key) {
+        return { key, dir: prev.dir === "asc" ? "desc" : "asc" };
+      }
+      return { key, dir: "asc" };
+    });
+  };
+
+  const sortArrow = (key: UserSortKey) => {
+    if (userSort.key !== key) return "";
+    return userSort.dir === "asc" ? " ▲" : " ▼";
+  };
+
+  const createdAtMillis = (t?: Timestamp | null) =>
+    t && typeof (t as any).toDate === "function" ? t.toDate().getTime() : 0;
+
+  const formatCreatedAt = (t?: Timestamp | null) => {
+    if (!t || typeof (t as any).toDate !== "function") return "—";
+    return t.toDate().toLocaleString(undefined, {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
 
   // --- Auth state listener ---
   useEffect(() => {
@@ -169,16 +214,23 @@ const AdminPage: React.FC = () => {
         const list: UserEntry[] = [];
         snap.forEach((d) => {
           const data = d.data() as any;
-          const email = (
-            data.emailLower ||
-            data.email ||
-            d.id ||
-            ""
-          ).toString();
+          const email = (data.emailLower || data.email || d.id || "").toString();
           const displayName = (data.displayName || "").toString();
           const tier = (data.tier ?? null) as Tier | null;
           const squadID = (data.squadID ?? null) as string | null;
-          list.push({ id: d.id, email, displayName, tier, squadID });
+
+          const createdAt = (data.createdAt ?? null) as Timestamp | null;
+          const source = (data.source ?? null) as string | null;
+
+          list.push({
+            id: d.id,
+            email,
+            displayName,
+            createdAt,
+            source,
+            tier,
+            squadID,
+          });
         });
         list.sort((a, b) => a.email.localeCompare(b.email));
         setUserEntries(list);
@@ -206,11 +258,7 @@ const AdminPage: React.FC = () => {
         });
 
         if (list.length === 0) {
-          const defaults = [
-            "Morning Oaks",
-            "Matinee Monsters",
-            "Wednesday Warriors",
-          ];
+          const defaults = ["Morning Oaks", "Matinee Monsters", "Wednesday Warriors"];
           const created: SquadOption[] = [];
           for (const name of defaults) {
             const ref = doc(collection(db, SQUADS_COLLECTION));
@@ -343,6 +391,31 @@ const AdminPage: React.FC = () => {
     } catch (e: any) {
       console.error(e);
       setError(e.message || "Failed to auto-save user record.");
+    }
+  };
+
+  // --- Allowlist cleanup helpers ---
+
+  const deleteAllowlistByEmailLower = async (emailLower: string) => {
+    const key = (emailLower || "").trim().toLowerCase();
+    if (!key) return;
+
+    const match = allowlistEntries.find((e) => {
+      const eEmail = (e.email || "").trim().toLowerCase();
+      const eId = (e.id || "").trim().toLowerCase();
+      return eEmail === key || eId === key;
+    });
+
+    try {
+      if (match) {
+        await deleteDoc(doc(db, ALLOWLIST_COLLECTION, match.id));
+      } else {
+        // allowlist doc id is usually emailLower, so try direct delete
+        await deleteDoc(doc(db, ALLOWLIST_COLLECTION, key));
+      }
+    } catch (e: any) {
+      // Firestore delete for missing doc is effectively harmless; suppress spam.
+      console.warn("Allowlist delete (safe) failed:", e?.message || e);
     }
   };
 
@@ -532,7 +605,8 @@ const AdminPage: React.FC = () => {
           user.email
         }\n\n` +
           `This ONLY deletes the Firestore doc (stats, tier, squad, etc.).\n` +
-          `It does NOT delete their sign-in account in Firebase Authentication.`
+          `It does NOT delete their sign-in account in Firebase Authentication.\n\n` +
+          `It WILL also remove any allowlist entry for this email, so they can only come back as Free.`
       )
     ) {
       return;
@@ -541,9 +615,12 @@ const AdminPage: React.FC = () => {
     setSaving(true);
     setError(null);
     try {
+      // 1) delete Firestore users/{uid}
       const ref = doc(db, USERS_COLLECTION, user.id);
       await deleteDoc(ref);
-      // onSnapshot removes from UI
+
+      // 2) also remove allowlist/{emailLower} so they can only come back as Free
+      await deleteAllowlistByEmailLower(user.email);
     } catch (e: any) {
       console.error(e);
       setError(e.message || "Failed to delete user record.");
@@ -603,17 +680,84 @@ const AdminPage: React.FC = () => {
     { free: 0, amateur: 0, pro: 0 } as Record<Tier, number>
   );
 
-  const filteredUsers = userEntries.filter((u) => {
-    const needle = searchUsers.trim().toLowerCase();
-    const matchesSearch =
-      !needle ||
-      u.email.toLowerCase().includes(needle) ||
-      (u.displayName || "").toLowerCase().includes(needle);
-    const effectiveTier: Tier = (u.tier || "free") as Tier;
-    const matchesTier =
-      tierFilterUsers === "all" || effectiveTier === tierFilterUsers;
-    return matchesSearch && matchesTier;
-  });
+  const filteredUsers = userEntries
+    .filter((u) => {
+      const needle = searchUsers.trim().toLowerCase();
+      const matchesSearch =
+        !needle ||
+        u.email.toLowerCase().includes(needle) ||
+        (u.displayName || "").toLowerCase().includes(needle);
+      const effectiveTier: Tier = (u.tier || "free") as Tier;
+      const matchesTier =
+        tierFilterUsers === "all" || effectiveTier === tierFilterUsers;
+      return matchesSearch && matchesTier;
+    })
+    .sort((a, b) => {
+      const dir = userSort.dir === "asc" ? 1 : -1;
+
+      if (userSort.key === "createdAt") {
+        return (createdAtMillis(a.createdAt) - createdAtMillis(b.createdAt)) * dir;
+      }
+
+      const av =
+        userSort.key === "displayName"
+          ? a.displayName || ""
+          : userSort.key === "email"
+          ? a.email || ""
+          : userSort.key === "source"
+          ? (a.source ?? "")
+          : "";
+
+      const bv =
+        userSort.key === "displayName"
+          ? b.displayName || ""
+          : userSort.key === "email"
+          ? b.email || ""
+          : userSort.key === "source"
+          ? (b.source ?? "")
+          : "";
+
+      return av.toString().localeCompare(bv.toString()) * dir;
+    });
+
+  // --- Auto-clean allowlist whenever a user exists in users collection ---
+  useEffect(() => {
+    if (!isAdmin) return;
+    if (loadingUsers || loadingAllowlist) return;
+    if (userEntries.length === 0 || allowlistEntries.length === 0) return;
+
+    const userEmailSet = new Set(
+      userEntries
+        .map((u) => (u.email || "").trim().toLowerCase())
+        .filter(Boolean)
+    );
+
+    const toDelete = allowlistEntries.filter((e) => {
+      const emailLower = (e.email || e.id || "").trim().toLowerCase();
+      if (!emailLower) return false;
+      if (!userEmailSet.has(emailLower)) return false;
+      if (autoCleanRanFor.current.has(emailLower)) return false;
+      return true;
+    });
+
+    if (toDelete.length === 0) return;
+
+    // mark first so repeated snapshots don't refire the same ones
+    toDelete.forEach((e) => {
+      const emailLower = (e.email || e.id || "").trim().toLowerCase();
+      if (emailLower) autoCleanRanFor.current.add(emailLower);
+    });
+
+    void (async () => {
+      try {
+        await Promise.all(
+          toDelete.map((e) => deleteDoc(doc(db, ALLOWLIST_COLLECTION, e.id)))
+        );
+      } catch (err: any) {
+        console.warn("Auto-clean allowlist failed:", err?.message || err);
+      }
+    })();
+  }, [isAdmin, loadingUsers, loadingAllowlist, userEntries, allowlistEntries]);
 
   // --- UI STATES (login / not authorized) ---
 
@@ -1064,8 +1208,30 @@ const AdminPage: React.FC = () => {
                     <table style={table}>
                       <thead>
                         <tr>
-                          <th style={th}>Display Name</th>
-                          <th style={th}>Email</th>
+                          <th
+                            style={clickableTh}
+                            onClick={() => toggleUserSort("displayName")}
+                          >
+                            Display Name{sortArrow("displayName")}
+                          </th>
+                          <th
+                            style={clickableTh}
+                            onClick={() => toggleUserSort("email")}
+                          >
+                            Email{sortArrow("email")}
+                          </th>
+                          <th
+                            style={clickableTh}
+                            onClick={() => toggleUserSort("createdAt")}
+                          >
+                            Created At{sortArrow("createdAt")}
+                          </th>
+                          <th
+                            style={clickableTh}
+                            onClick={() => toggleUserSort("source")}
+                          >
+                            Source{sortArrow("source")}
+                          </th>
                           <th style={th}>Tier</th>
                           <th style={th}>Squad</th>
                           <th style={th}>Actions</th>
@@ -1082,6 +1248,10 @@ const AdminPage: React.FC = () => {
                               <td style={tdEmail}>
                                 <div style={{ opacity: 0.8 }}>{u.email}</div>
                               </td>
+                              <td style={tdCreatedAt}>
+                                {formatCreatedAt(u.createdAt)}
+                              </td>
+                              <td style={tdSource}>{u.source || "—"}</td>
                               <td style={tdTier}>
                                 <select
                                   value={effectiveTier}
@@ -1313,6 +1483,12 @@ const th: React.CSSProperties = {
   zIndex: 1,
 };
 
+const clickableTh: React.CSSProperties = {
+  ...th,
+  cursor: "pointer",
+  userSelect: "none",
+};
+
 const tdBase: React.CSSProperties = {
   padding: "6px 6px",
   borderBottom: "1px solid #111827",
@@ -1329,6 +1505,18 @@ const tdEmail: React.CSSProperties = {
   ...tdBase,
   maxWidth: 260,
   wordBreak: "break-all",
+};
+
+const tdCreatedAt: React.CSSProperties = {
+  ...tdBase,
+  whiteSpace: "nowrap",
+  maxWidth: 170,
+};
+
+const tdSource: React.CSSProperties = {
+  ...tdBase,
+  whiteSpace: "nowrap",
+  maxWidth: 140,
 };
 
 const tdTier: React.CSSProperties = {
