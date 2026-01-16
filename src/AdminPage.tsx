@@ -200,9 +200,6 @@ const AdminPage: React.FC = () => {
     return best;
   };
 
-  // Backwards-compat names used elsewhere in the file
-  const createdAtMillis = timestampMillis;
-  const formatCreatedAt = formatTimestamp;
 
   // --- Auth state listener ---
   useEffect(() => {
