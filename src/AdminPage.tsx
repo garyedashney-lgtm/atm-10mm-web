@@ -76,9 +76,22 @@ interface UserEntry {
   id: string; // doc id = UID
   email: string;
   displayName: string;
+
   createdAt?: Timestamp | null;
+  updatedAt?: Timestamp | null;
+  leaderboardUpdatedAt?: Timestamp | null;
+
   source?: string | null;
+
+  // Trial fields
+  trialProvided?: boolean | null;
+  trialStatus?: string | null;
+  trialEndsAt?: Timestamp | null;
+
+  // Tier fields
   tier?: Tier | null; // missing = free
+  tierOverride?: Tier | null; // only "pro" | "amateur" | null (we'll enforce later)
+
   squadID?: string | null;
 }
 
@@ -89,7 +102,16 @@ interface SquadOption {
 
 const googleProvider = new GoogleAuthProvider();
 
-type UserSortKey = "displayName" | "email" | "createdAt" | "source";
+type UserSortKey =
+  | "displayName"
+  | "email"
+  | "createdAt"
+  | "source"
+  | "trialProvided"
+  | "trialStatus"
+  | "trialEndsAt"
+  | "updatedAt"
+  | "tierOverride";
 type SortDir = "asc" | "desc";
 
 const AdminPage: React.FC = () => {
@@ -145,19 +167,42 @@ const AdminPage: React.FC = () => {
     return userSort.dir === "asc" ? " ▲" : " ▼";
   };
 
-  const createdAtMillis = (t?: Timestamp | null) =>
+    const timestampMillis = (t?: Timestamp | null) =>
     t && typeof (t as any).toDate === "function" ? t.toDate().getTime() : 0;
 
-  const formatCreatedAt = (t?: Timestamp | null) => {
-    if (!t || typeof (t as any).toDate !== "function") return "—";
-    return t.toDate().toLocaleString(undefined, {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+  const formatTimestamp = (t?: Timestamp | null) => {
+  if (!t || typeof (t as any).toDate !== "function") return "—";
+  return t.toDate().toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+};
+
+  // quick “how long ago” indicator for Updated At
+  const daysSince = (t?: Timestamp | null) => {
+    const ms = timestampMillis(t);
+    if (!ms) return "—";
+    const days = Math.floor((Date.now() - ms) / (1000 * 60 * 60 * 24));
+    return `${days}d`;
   };
+    const latestTimestamp = (...items: (Timestamp | null | undefined)[]) => {
+    let best: Timestamp | null = null;
+    let bestMs = 0;
+
+    for (const t of items) {
+      const ms = timestampMillis(t ?? null);
+      if (ms > bestMs) {
+        bestMs = ms;
+        best = (t ?? null) as Timestamp | null;
+      }
+    }
+    return best;
+  };
+
+  // Backwards-compat names used elsewhere in the file
+  const createdAtMillis = timestampMillis;
+  const formatCreatedAt = formatTimestamp;
 
   // --- Auth state listener ---
   useEffect(() => {
@@ -207,41 +252,57 @@ const AdminPage: React.FC = () => {
     );
 
     // users
-    setLoadingUsers(true);
-    const usersUnsub = onSnapshot(
-      collection(db, USERS_COLLECTION),
-      (snap) => {
-        const list: UserEntry[] = [];
-        snap.forEach((d) => {
-          const data = d.data() as any;
-          const email = (data.emailLower || data.email || d.id || "").toString();
-          const displayName = (data.displayName || "").toString();
-          const tier = (data.tier ?? null) as Tier | null;
-          const squadID = (data.squadID ?? null) as string | null;
+    // users
+setLoadingUsers(true);
+const usersUnsub = onSnapshot(
+  collection(db, USERS_COLLECTION),
+  (snap) => {
+    const list: UserEntry[] = [];
+    snap.forEach((d) => {
+      const data = d.data() as any;
+      const email = (data.emailLower || data.email || d.id || "").toString();
+      const displayName = (data.displayName || "").toString();
+      const tier = (data.tier ?? null) as Tier | null;
+      const squadID = (data.squadID ?? null) as string | null;
 
-          const createdAt = (data.createdAt ?? null) as Timestamp | null;
-          const source = (data.source ?? null) as string | null;
+      const createdAt = (data.createdAt ?? null) as Timestamp | null;
+      const updatedAt = (data.updatedAt ?? null) as Timestamp | null;
+      const leaderboardUpdatedAt = (data.leaderboardUpdatedAt ?? null) as Timestamp | null;
+      const source = (data.source ?? null) as string | null;
 
-          list.push({
-            id: d.id,
-            email,
-            displayName,
-            createdAt,
-            source,
-            tier,
-            squadID,
-          });
-        });
-        list.sort((a, b) => a.email.localeCompare(b.email));
-        setUserEntries(list);
-        setLoadingUsers(false);
-      },
-      (err) => {
-        console.error(err);
-        setError((prev) => prev || err.message || "Failed to listen to users.");
-        setLoadingUsers(false);
-      }
-    );
+      const trialProvided = (data.trialProvided ?? null) as boolean | null;
+      const trialStatus = (data.trialStatus ?? null) as string | null;
+      const trialEndsAt = (data.trialEndsAt ?? null) as Timestamp | null;
+
+      const tierOverride = (data.tierOverride ?? null) as Tier | null;
+
+      list.push({
+        id: d.id,
+        email,
+        displayName,
+        createdAt,
+        updatedAt,
+        leaderboardUpdatedAt,
+        source,
+        trialProvided,
+        trialStatus,
+        trialEndsAt,
+        tier,
+        tierOverride,
+        squadID,
+      });
+    });
+
+    list.sort((a, b) => a.email.localeCompare(b.email));
+    setUserEntries(list);
+    setLoadingUsers(false);
+  },
+  (err) => {
+    console.error(err);
+    setError((prev) => prev || err.message || "Failed to listen to users.");
+    setLoadingUsers(false);
+  }
+);
 
     // squads
     setLoadingSquads(true);
@@ -391,6 +452,39 @@ const AdminPage: React.FC = () => {
     } catch (e: any) {
       console.error(e);
       setError(e.message || "Failed to auto-save user record.");
+    }
+  };
+
+    const setUserTierOverride = async (
+    userId: string,
+    override: "pro" | "amateur"
+  ) => {
+    try {
+      const ref = doc(db, USERS_COLLECTION, userId);
+      await updateDoc(ref, {
+        tierOverride: override,
+        tier: override, // keep consistent
+        // Optional: if overriding, treat any trial as ended
+        trialStatus: "ended",
+        trialEndedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (e: any) {
+      console.error(e);
+      setError(e.message || "Failed to set tier override.");
+    }
+  };
+
+  const clearUserTierOverride = async (userId: string) => {
+    try {
+      const ref = doc(db, USERS_COLLECTION, userId);
+      await updateDoc(ref, {
+        tierOverride: deleteField(),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (e: any) {
+      console.error(e);
+      setError(e.message || "Failed to clear tier override.");
     }
   };
 
@@ -692,13 +786,43 @@ const AdminPage: React.FC = () => {
         tierFilterUsers === "all" || effectiveTier === tierFilterUsers;
       return matchesSearch && matchesTier;
     })
-    .sort((a, b) => {
+        .sort((a, b) => {
       const dir = userSort.dir === "asc" ? 1 : -1;
 
+      // Timestamp sorts
       if (userSort.key === "createdAt") {
-        return (createdAtMillis(a.createdAt) - createdAtMillis(b.createdAt)) * dir;
+        return (timestampMillis(a.createdAt) - timestampMillis(b.createdAt)) * dir;
+      }
+      if (userSort.key === "updatedAt") {
+        const aLast = latestTimestamp(a.updatedAt, a.leaderboardUpdatedAt);
+        const bLast = latestTimestamp(b.updatedAt, b.leaderboardUpdatedAt);
+        return (timestampMillis(aLast) - timestampMillis(bLast)) * dir;
+}
+      if (userSort.key === "trialEndsAt") {
+        return (timestampMillis(a.trialEndsAt) - timestampMillis(b.trialEndsAt)) * dir;
       }
 
+      // Bool-ish sort
+      if (userSort.key === "trialProvided") {
+        const av = a.trialProvided ? 1 : 0;
+        const bv = b.trialProvided ? 1 : 0;
+        return (av - bv) * dir;
+      }
+
+      // Enum-ish sorts
+      if (userSort.key === "trialStatus") {
+        const score = (v?: string | null) =>
+          v === "active" ? 2 : v === "ended" ? 1 : 0;
+        return (score(a.trialStatus) - score(b.trialStatus)) * dir;
+      }
+
+      if (userSort.key === "tierOverride") {
+        const score = (v?: string | null) =>
+          v === "pro" ? 2 : v === "amateur" ? 1 : 0;
+        return (score(a.tierOverride) - score(b.tierOverride)) * dir;
+      }
+
+      // String sorts (default)
       const av =
         userSort.key === "displayName"
           ? a.displayName || ""
@@ -1208,32 +1332,51 @@ const AdminPage: React.FC = () => {
                     <table style={table}>
                       <thead>
                         <tr>
-                          <th
-                            style={clickableTh}
-                            onClick={() => toggleUserSort("displayName")}
-                          >
+                          <th style={clickableTh} onClick={() => toggleUserSort("displayName")}>
                             Display Name{sortArrow("displayName")}
                           </th>
-                          <th
-                            style={clickableTh}
-                            onClick={() => toggleUserSort("email")}
-                          >
+
+                          <th style={clickableTh} onClick={() => toggleUserSort("email")}>
                             Email{sortArrow("email")}
                           </th>
-                          <th
-                            style={clickableTh}
-                            onClick={() => toggleUserSort("createdAt")}
-                          >
+
+                          <th style={clickableTh} onClick={() => toggleUserSort("createdAt")}>
                             Created At{sortArrow("createdAt")}
                           </th>
-                          <th
-                            style={clickableTh}
-                            onClick={() => toggleUserSort("source")}
-                          >
+
+                          <th style={clickableTh} onClick={() => toggleUserSort("source")}>
                             Source{sortArrow("source")}
                           </th>
+
+                          {/* New: trial + usage columns */}
+                          <th style={clickableTh} onClick={() => toggleUserSort("trialProvided")}>
+                            Trial Provided{sortArrow("trialProvided")}
+                          </th>
+
+                          <th style={clickableTh} onClick={() => toggleUserSort("trialStatus")}>
+                            Trial Status{sortArrow("trialStatus")}
+                          </th>
+
+                          <th style={clickableTh} onClick={() => toggleUserSort("trialEndsAt")}>
+                            Trial Ends{sortArrow("trialEndsAt")}
+                          </th>
+
+                          <th style={clickableTh} onClick={() => toggleUserSort("updatedAt")}>
+                            Last Active{sortArrow("updatedAt")}
+                          </th>
+
+                          {/* Not sortable key (derived), but we can still sort by updatedAt via Updated At column */}
+                          <th style={th}>Days Since</th>
+
+                          {/* Existing */}
                           <th style={th}>Tier</th>
                           <th style={th}>Squad</th>
+
+                          {/* New: tierOverride moved near the end */}
+                          <th style={clickableTh} onClick={() => toggleUserSort("tierOverride")}>
+                            Tier Override{sortArrow("tierOverride")}
+                          </th>
+
                           <th style={th}>Actions</th>
                         </tr>
                       </thead>
@@ -1241,47 +1384,50 @@ const AdminPage: React.FC = () => {
                         {filteredUsers.map((u) => {
                           const effectiveTier: Tier = (u.tier || "free") as Tier;
                           const isFreeByMissingField = !u.tier;
+                          const lastActiveAt = latestTimestamp(u.updatedAt, u.leaderboardUpdatedAt);
 
                           return (
                             <tr key={u.id}>
                               <td style={tdName}>{u.displayName || "—"}</td>
+
                               <td style={tdEmail}>
                                 <div style={{ opacity: 0.8 }}>{u.email}</div>
                               </td>
-                              <td style={tdCreatedAt}>
-                                {formatCreatedAt(u.createdAt)}
-                              </td>
+
+                              <td style={tdCreatedAt}>{formatTimestamp(u.createdAt)}</td>
+
                               <td style={tdSource}>{u.source || "—"}</td>
+
+                              {/* New columns */}
+                              <td style={tdSource}>{u.trialProvided ? "yes" : "—"}</td>
+
+                              <td style={tdSource}>{u.trialStatus || "—"}</td>
+
+                              <td style={tdCreatedAt}>{formatTimestamp(u.trialEndsAt)}</td>
+
+                              <td style={tdCreatedAt}>{formatTimestamp(lastActiveAt)}</td>
+                              <td style={tdSource}>{daysSince(lastActiveAt)}</td>
+
+                              {/* Existing Tier */}
                               <td style={tdTier}>
                                 <select
                                   value={effectiveTier}
-                                  onChange={(ev) =>
-                                    handleUserTierChange(
-                                      u.id,
-                                      ev.target.value as Tier
-                                    )
-                                  }
+                                  onChange={(ev) => handleUserTierChange(u.id, ev.target.value as Tier)}
                                   style={getTierSelectStyle(effectiveTier)}
                                 >
                                   <option value="free">
-                                    Free
-                                    {isFreeByMissingField
-                                      ? " (no tier set)"
-                                      : ""}
+                                    Free{isFreeByMissingField ? " (no tier set)" : ""}
                                   </option>
                                   <option value="amateur">Amateur</option>
                                   <option value="pro">Pro</option>
                                 </select>
                               </td>
+
+                              {/* Existing Squad */}
                               <td style={tdSquad}>
                                 <select
                                   value={u.squadID ?? ""}
-                                  onChange={(ev) =>
-                                    handleUserSquadSelectChange(
-                                      u.id,
-                                      ev.target.value
-                                    )
-                                  }
+                                  onChange={(ev) => handleUserSquadSelectChange(u.id, ev.target.value)}
                                   style={select}
                                 >
                                   <option value="">None</option>
@@ -1290,11 +1436,37 @@ const AdminPage: React.FC = () => {
                                       {s.name}
                                     </option>
                                   ))}
-                                  <option value="__ADD_NEW__">
-                                    ➕ Add new…
-                                  </option>
+                                  <option value="__ADD_NEW__">➕ Add new…</option>
                                 </select>
                               </td>
+
+                              {/* New: Tier Override display (read-only for now) */}
+                              <td style={tdSource}>
+                                <select
+                                  value={u.tierOverride ?? ""}
+                                  onChange={(ev) => {
+                                    const v = ev.target.value;
+                                    if (!v) {
+                                      void clearUserTierOverride(u.id);
+                                    } else {
+                                      void setUserTierOverride(u.id, v as "pro" | "amateur");
+                                    }
+                                  }}
+                                  style={select}
+                                  disabled={u.source === "stripe"}
+                                  title={
+                                    u.source === "stripe"
+                                      ? "Stripe users are controlled by webhooks (override disabled)."
+                                      : ""
+                                  }
+                                >
+                                  <option value="">—</option>
+                                  <option value="pro">pro</option>
+                                  <option value="amateur">amateur</option>
+                                </select>
+                              </td>
+
+                              {/* Actions */}
                               <td style={tdActions}>
                                 <div style={{ display: "flex", gap: 10 }}>
                                   <button
@@ -1388,7 +1560,7 @@ const card: React.CSSProperties = {
   color: "#e5e7eb",
   borderRadius: 16,
   padding: 24,
-  maxWidth: 1100,
+  maxWidth: 1600,
   width: "100%",
   boxShadow: "0 20px 40px rgba(0,0,0,0.4)",
   margin: "0 auto 24px",
@@ -1464,7 +1636,8 @@ const select: React.CSSProperties = {
 };
 
 const table: React.CSSProperties = {
-  width: "100%",
+  width: "max-content",
+  minWidth: "100%",
   borderCollapse: "collapse",
   fontSize: 14,
   tableLayout: "auto",
