@@ -179,13 +179,19 @@ const AdminPage: React.FC = () => {
   });
 };
 
-  // quick “how long ago” indicator for Updated At
-  const daysSince = (t?: Timestamp | null) => {
-    const ms = timestampMillis(t);
-    if (!ms) return "—";
-    const days = Math.floor((Date.now() - ms) / (1000 * 60 * 60 * 24));
-    return `${days}d`;
-  };
+  // quick “how long ago” indicator for Updated At (clamped to avoid -1 due to clock skew)
+const daysSince = (t?: Timestamp | null) => {
+  const ms = timestampMillis(t);
+  if (!ms) return "—";
+
+  const diffMs = Date.now() - ms;
+
+  // If server timestamp is slightly in the future vs this browser clock,
+  // diffMs can be negative; clamp to 0 days.
+  const days = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+
+  return `${days}d`;
+};
     const latestTimestamp = (...items: (Timestamp | null | undefined)[]) => {
     let best: Timestamp | null = null;
     let bestMs = 0;
