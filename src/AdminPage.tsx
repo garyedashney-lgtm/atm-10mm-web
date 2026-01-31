@@ -90,7 +90,7 @@ interface UserEntry {
 
   // Tier fields
   tier?: Tier | null; // missing = free
-  tierOverride?: Tier | null; // only "pro" | "amateur" | null (we'll enforce later)
+
 
   squadID?: string | null;
 }
@@ -110,8 +110,8 @@ type UserSortKey =
   | "trialProvided"
   | "trialStatus"
   | "trialEndsAt"
-  | "updatedAt"
-  | "tierOverride";
+  | "updatedAt";
+
 type SortDir = "asc" | "desc";
 
 const AdminPage: React.FC = () => {
@@ -277,7 +277,7 @@ const usersUnsub = onSnapshot(
       const trialStatus = (data.trialStatus ?? null) as string | null;
       const trialEndsAt = (data.trialEndsAt ?? null) as Timestamp | null;
 
-      const tierOverride = (data.tierOverride ?? null) as Tier | null;
+    
 
       list.push({
         id: d.id,
@@ -291,7 +291,6 @@ const usersUnsub = onSnapshot(
         trialStatus,
         trialEndsAt,
         tier,
-        tierOverride,
         squadID,
       });
     });
@@ -437,11 +436,8 @@ const usersUnsub = onSnapshot(
         updatedAt: serverTimestamp(),
       };
 
-      if (!user.tier || user.tier === "free") {
-        updateData.tier = deleteField();
-      } else {
-        updateData.tier = user.tier;
-      }
+      // Always persist tier explicitly (including "free")
+      updateData.tier = (user.tier ?? "free") as Tier;
 
       const squad = (user.squadID ?? "").toString().trim();
       if (squad) {
@@ -458,38 +454,7 @@ const usersUnsub = onSnapshot(
     }
   };
 
-    const setUserTierOverride = async (
-    userId: string,
-    override: "pro" | "amateur"
-  ) => {
-    try {
-      const ref = doc(db, USERS_COLLECTION, userId);
-      await updateDoc(ref, {
-        tierOverride: override,
-        tier: override, // keep consistent
-        // Optional: if overriding, treat any trial as ended
-        trialStatus: "ended",
-        trialEndedAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-    } catch (e: any) {
-      console.error(e);
-      setError(e.message || "Failed to set tier override.");
-    }
-  };
-
-  const clearUserTierOverride = async (userId: string) => {
-    try {
-      const ref = doc(db, USERS_COLLECTION, userId);
-      await updateDoc(ref, {
-        tierOverride: deleteField(),
-        updatedAt: serverTimestamp(),
-      });
-    } catch (e: any) {
-      console.error(e);
-      setError(e.message || "Failed to clear tier override.");
-    }
-  };
+    
 
   // --- Allowlist cleanup helpers ---
 
@@ -819,11 +784,7 @@ const usersUnsub = onSnapshot(
         return (score(a.trialStatus) - score(b.trialStatus)) * dir;
       }
 
-      if (userSort.key === "tierOverride") {
-        const score = (v?: string | null) =>
-          v === "pro" ? 2 : v === "amateur" ? 1 : 0;
-        return (score(a.tierOverride) - score(b.tierOverride)) * dir;
-      }
+      
 
       // String sorts (default)
       const av =
@@ -1375,10 +1336,7 @@ const usersUnsub = onSnapshot(
                           <th style={th}>Tier</th>
                           <th style={th}>Squad</th>
 
-                          {/* New: tierOverride moved near the end */}
-                          <th style={clickableTh} onClick={() => toggleUserSort("tierOverride")}>
-                            Tier Override{sortArrow("tierOverride")}
-                          </th>
+                          
 
                           <th style={th}>Actions</th>
                         </tr>
@@ -1443,31 +1401,7 @@ const usersUnsub = onSnapshot(
                                 </select>
                               </td>
 
-                              {/* New: Tier Override display (read-only for now) */}
-                              <td style={tdSource}>
-                                <select
-                                  value={u.tierOverride ?? ""}
-                                  onChange={(ev) => {
-                                    const v = ev.target.value;
-                                    if (!v) {
-                                      void clearUserTierOverride(u.id);
-                                    } else {
-                                      void setUserTierOverride(u.id, v as "pro" | "amateur");
-                                    }
-                                  }}
-                                  style={select}
-                                  disabled={u.source === "stripe"}
-                                  title={
-                                    u.source === "stripe"
-                                      ? "Stripe users are controlled by webhooks (override disabled)."
-                                      : ""
-                                  }
-                                >
-                                  <option value="">—</option>
-                                  <option value="pro">pro</option>
-                                  <option value="amateur">amateur</option>
-                                </select>
-                              </td>
+                        
 
                               {/* Actions */}
                               <td style={tdActions}>
