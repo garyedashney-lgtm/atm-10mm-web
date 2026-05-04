@@ -90,7 +90,7 @@ interface UserEntry {
 
   // Tier fields
   tier?: Tier | null; // missing = free
-
+  tierOverride?: Tier | null; // admin manual override wins over trial
 
   squadID?: string | null;
 }
@@ -110,7 +110,8 @@ type UserSortKey =
   | "trialProvided"
   | "trialStatus"
   | "trialEndsAt"
-  | "updatedAt";
+  | "updatedAt"
+  | "daysSince";
 
 type SortDir = "asc" | "desc";
 
@@ -192,20 +193,6 @@ const daysSince = (t?: Timestamp | null) => {
 
   return `${days}d`;
 };
-    const latestTimestamp = (...items: (Timestamp | null | undefined)[]) => {
-    let best: Timestamp | null = null;
-    let bestMs = 0;
-
-    for (const t of items) {
-      const ms = timestampMillis(t ?? null);
-      if (ms > bestMs) {
-        bestMs = ms;
-        best = (t ?? null) as Timestamp | null;
-      }
-    }
-    return best;
-  };
-
 
   // --- Auth state listener ---
   useEffect(() => {
@@ -266,6 +253,9 @@ const usersUnsub = onSnapshot(
       const email = (data.emailLower || data.email || d.id || "").toString();
       const displayName = (data.displayName || "").toString();
       const tier = (data.tier ?? null) as Tier | null;
+
+      const tierOverride = (data.tierOverride ?? null) as Tier | null;
+
       const squadID = (data.squadID ?? null) as string | null;
 
       const createdAt = (data.createdAt ?? null) as Timestamp | null;
@@ -291,6 +281,7 @@ const usersUnsub = onSnapshot(
         trialStatus,
         trialEndsAt,
         tier,
+        tierOverride,
         squadID,
       });
     });
@@ -437,7 +428,19 @@ const usersUnsub = onSnapshot(
       };
 
       // Always persist tier explicitly (including "free")
-      updateData.tier = (user.tier ?? "free") as Tier;
+      // Admin tier control:
+      // - Free → remove override and tier (true free user)
+      // - Amateur/Pro → set BOTH tier and tierOverride
+
+     if ((user.tier ?? "free") === "free") {
+      updateData.tier = "free";
+      updateData.tierOverride = deleteField();
+      updateData.pro = false;
+    } else {
+      updateData.tier = user.tier;
+      updateData.tierOverride = user.tier;
+      updateData.pro = user.tier === "pro";
+    }
 
       const squad = (user.squadID ?? "").toString().trim();
       if (squad) {
@@ -735,7 +738,7 @@ const usersUnsub = onSnapshot(
   const totalUsers = userEntries.length;
   const userCounts = userEntries.reduce(
     (acc, u) => {
-      const effectiveTier: Tier = (u.tier || "free") as Tier;
+      const effectiveTier: Tier = (u.tierOverride || u.tier || "free") as Tier;
       acc[effectiveTier] += 1;
       return acc;
     },
@@ -749,7 +752,7 @@ const usersUnsub = onSnapshot(
         !needle ||
         u.email.toLowerCase().includes(needle) ||
         (u.displayName || "").toLowerCase().includes(needle);
-      const effectiveTier: Tier = (u.tier || "free") as Tier;
+      const effectiveTier: Tier = (u.tierOverride || u.tier || "free") as Tier;
       const matchesTier =
         tierFilterUsers === "all" || effectiveTier === tierFilterUsers;
       return matchesSearch && matchesTier;
@@ -762,10 +765,13 @@ const usersUnsub = onSnapshot(
         return (timestampMillis(a.createdAt) - timestampMillis(b.createdAt)) * dir;
       }
       if (userSort.key === "updatedAt") {
-        const aLast = latestTimestamp(a.updatedAt, a.leaderboardUpdatedAt);
-        const bLast = latestTimestamp(b.updatedAt, b.leaderboardUpdatedAt);
-        return (timestampMillis(aLast) - timestampMillis(bLast)) * dir;
-}
+        return (timestampMillis(a.updatedAt) - timestampMillis(b.updatedAt)) * dir;
+      }
+
+      if (userSort.key === "daysSince") {
+        return (timestampMillis(b.updatedAt) - timestampMillis(a.updatedAt)) * dir;
+      }
+
       if (userSort.key === "trialEndsAt") {
         return (timestampMillis(a.trialEndsAt) - timestampMillis(b.trialEndsAt)) * dir;
       }
@@ -1330,7 +1336,9 @@ const usersUnsub = onSnapshot(
                           </th>
 
                           {/* Not sortable key (derived), but we can still sort by updatedAt via Updated At column */}
-                          <th style={th}>Days Since</th>
+                          <th style={clickableTh} onClick={() => toggleUserSort("daysSince")}>
+                            Days Since{sortArrow("daysSince")}
+                          </th>
 
                           {/* Existing */}
                           <th style={th}>Tier</th>
@@ -1343,9 +1351,9 @@ const usersUnsub = onSnapshot(
                       </thead>
                       <tbody>
                         {filteredUsers.map((u) => {
-                          const effectiveTier: Tier = (u.tier || "free") as Tier;
+                          const effectiveTier: Tier = (u.tierOverride || u.tier || "free") as Tier;
                           const isFreeByMissingField = !u.tier;
-                          const lastActiveAt = latestTimestamp(u.updatedAt, u.leaderboardUpdatedAt);
+                          const lastActiveAt = u.updatedAt;
 
                           return (
                             <tr key={u.id}>
